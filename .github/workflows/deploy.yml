@@ -1,0 +1,145 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_a:
+        description: "Cluster A"
+        type: boolean
+        default: true
+      cluster_b:
+        description: "Cluster B"
+        type: boolean
+        default: true
+      luis:
+        description: "LUIS"
+        type: boolean
+        default: false
+      build_container:
+        description: "Build container"
+        type: boolean
+        default: true
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build container
+    if: ${{ inputs.build_container }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+      image: ${{ steps.vars.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: vars
+        run: |
+          IMAGE_TAG="$(git rev-parse --short HEAD)"
+          IMAGE="ghcr.io/${{ github.repository }}:${IMAGE_TAG}"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          build-args: |
+            GIT_SHA=${{ steps.vars.outputs.image_tag }}
+          tags: ${{ steps.vars.outputs.image }}
+
+      - name: Resolve digest
+        run: docker buildx imagetools inspect "${{ steps.vars.outputs.image }}"
+
+  deploy-cluster-a:
+    name: Deploy Cluster A
+    needs: build
+    if: ${{ always() && inputs.cluster_a && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    environment: cluster-a
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.CLUSTER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+      - name: Run deploy.sh
+        env:
+          SSH_KEY: ~/.ssh/deploy_key
+          GHCR_ORG: ${{ github.repository_owner }}
+          GHCR_PROJECT: ${{ github.event.repository.name }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: ./deploy.sh cluster-a "${{ needs.build.outputs.image_tag || 'dummy' }}"
+
+  deploy-cluster-b:
+    name: Deploy Cluster B
+    needs: build
+    if: ${{ always() && inputs.cluster_b && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    environment: cluster-b
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.CLUSTER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+      - name: Run deploy.sh
+        env:
+          SSH_KEY: ~/.ssh/deploy_key
+          GHCR_ORG: ${{ github.repository_owner }}
+          GHCR_PROJECT: ${{ github.event.repository.name }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: ./deploy.sh cluster-b "${{ needs.build.outputs.image_tag || 'dummy' }}"
+
+  deploy-luis:
+    name: Deploy LUIS
+    needs: build
+    if: ${{ always() && inputs.luis && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    environment: luis
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.CLUSTER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+      - name: Run deploy.sh
+        env:
+          SSH_KEY: ~/.ssh/deploy_key
+          GHCR_ORG: ${{ github.repository_owner }}
+          GHCR_PROJECT: ${{ github.event.repository.name }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: ./deploy.sh luis "${{ needs.build.outputs.image_tag || 'dummy' }}"
+
+  summary:
+    name: Summary
+    needs: [build, deploy-cluster-a, deploy-cluster-b, deploy-luis]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write job summary
+        run: |
+          {
+            echo "### Deploy summary"
+            echo
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "| Build | ${{ needs.build.result }} |"
+            echo "| Cluster A | ${{ needs.deploy-cluster-a.result }} |"
+            echo "| Cluster B | ${{ needs.deploy-cluster-b.result }} |"
+            echo "| LUIS | ${{ needs.deploy-luis.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

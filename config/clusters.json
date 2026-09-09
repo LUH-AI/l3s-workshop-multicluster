@@ -1,0 +1,28 @@
+{
+  "clusters": [
+    {
+      "name": "cluster-a",
+      "type": "docker",
+      "host": "CHANGE-ME-cluster-a.example.org",
+      "port": 22,
+      "user": "deploy",
+      "container_name": "multicluster-workshop"
+    },
+    {
+      "name": "cluster-b",
+      "type": "docker",
+      "host": "CHANGE-ME-cluster-b.example.org",
+      "port": 22,
+      "user": "deploy",
+      "container_name": "multicluster-workshop"
+    },
+    {
+      "name": "luis",
+      "type": "apptainer",
+      "host": "CHANGE-ME-luis.uni-hannover.de",
+      "port": 22,
+      "user": "deploy",
+      "sif_path": "/home/deploy/multicluster-workshop.sif"
+    }
+  ]
+}
