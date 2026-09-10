@@ -1,16 +1,15 @@
 # Multicluster Workshop
 
-Ein Deployment-Workflow, der aus einem privaten GitHub-Repo per GitHub
-Actions ein Container-Image baut, nach GHCR pusht und anschließend auf
-mehreren heterogenen Zielsystemen ausrollt (zwei Docker-Cluster + LUIS via
-Apptainer).
+A deployment pipeline that builds a container image from a private GitHub
+repo via GitHub Actions, pushes it to GHCR, and rolls it out to multiple
+heterogeneous target systems (two Docker clusters + LUIS via Apptainer).
 
-## Architektur
+## Architecture
 
 ```
                        GitHub
                          │
-                    privates Repo
+                    private repo
                          │
               ┌──────────┴──────────┐
               │                     │
@@ -26,183 +25,191 @@ Apptainer).
  Docker     Docker     Apptainer
 ```
 
-## Repo-Struktur
+## Repo structure
 
 ```
 multicluster-workshop/
 ├── .github/workflows/
-│   ├── deploy.yml          # workflow_dispatch, Cluster-Auswahl, Build + Deploy
-│   └── health.yml          # geplanter/manueller Verify-Lauf ohne Deploy
+│   ├── deploy.yml          # workflow_dispatch, cluster selection, build + deploy
+│   └── health.yml          # scheduled/manual verify run without deploying
 ├── config/
-│   └── clusters.json       # zentrale Cluster-Definition (Name, Typ, Host, ...)
+│   └── clusters.json       # central cluster definition (name, type, host, ...)
 ├── scripts/
 │   ├── deploy.sh           # ./deploy.sh <cluster-name> <image-tag>
-│   ├── verify.sh           # Soll/Ist-Vergleich über alle Cluster
+│   ├── verify.sh           # expected-vs-actual comparison across all clusters
 │   ├── create-deployment-info.sh
-│   ├── preflight.sh        # lokale Tools + SSH-Erreichbarkeit prüfen
-│   └── sync.sh             # optionaler rsync von src/ (getrennt vom Image-Deploy)
+│   ├── preflight.sh        # checks local tooling + SSH reachability
+│   └── sync.sh             # optional rsync of src/ (kept separate from image deploy)
 ├── cluster-config/
-│   ├── local-docker.sh     # generisches lokales Test-Zielsystem (sshd + docker)
-│   ├── cluster-a-docker.sh # Cluster-A-Stand-in lokal starten
-│   └── luis-apptainer.sh   # Pull+Run gegen ein echtes Apptainer-System testen
+│   ├── local-docker.sh     # generic local test target (sshd + docker)
+│   ├── cluster-a-docker.sh # spin up the Cluster A stand-in locally
+│   └── luis-apptainer.sh   # test pull+run against a real Apptainer system
 ├── src/hello.py
-├── deploy.sh                # Wrapper -> scripts/deploy.sh (für `./deploy.sh ...`)
+├── deploy.sh                # wrapper -> scripts/deploy.sh (so `./deploy.sh ...` works)
 ├── version.txt
 ├── requirements.txt
 └── Dockerfile
 ```
 
-Hinweis: aus dem ursprünglichen Diagramm wurde `cluster config/` zu
-`cluster-config/` (kein Leerzeichen im Verzeichnisnamen).
+Note: the original diagram's `cluster config/` became `cluster-config/`
+(directory names can't contain spaces).
 
-## Vorbereitung
+## Preparation
 
-1. **Workshop-Repo**: dieses Repo als privates GitHub-Repo anlegen/pushen.
-2. **Runner vorbereiten**: dedizierter GitHub-Actions-Runner (self-hosted
-   oder GitHub-hosted, siehe Sicherheitsabschnitt), Zugriff auf `docker`,
+1. **Workshop repo**: create/push this repo as a private GitHub repo.
+2. **Prepare the runner**: a dedicated GitHub Actions runner (self-hosted or
+   GitHub-hosted, see the security section below), with access to `docker`,
    `jq`, `ssh`, `rsync`.
-3. **Zielsysteme vorbereiten** – zwei lokale Docker-Container als Stand-in
-   für Cluster A/B:
+3. **Prepare target systems** - two local Docker containers standing in for
+   Cluster A/B:
    ```
    ssh-keygen -t ed25519 -f ~/.ssh/id_cluster_a -N ""
    ./cluster-config/cluster-a-docker.sh ~/.ssh/id_cluster_a.pub
-   # cluster-b analog: local-docker.sh cluster-b <port> <pubkey> kopieren/anpassen
+   # cluster-b analog: copy/adjust local-docker.sh cluster-b <port> <pubkey>
    ```
-   Runner-Zugriff auf die Container absichern (siehe unten).
-4. `config/clusters.json` mit echten Hosts/Usern füllen.
-5. **SSH testen**:
+
+   Lock down the runner's access to the containers (see below).
+4. Fill in `config/clusters.json` with real hosts/users.
+5. **Test SSH**:
    ```
    ssh -p 2201 -i ~/.ssh/id_cluster_a deploy@127.0.0.1
    ./scripts/preflight.sh
    ```
-6. **Platzhalter-Image** vor dem Split bereitstellen, damit Gruppe 1/3/4
-   nicht auf Gruppe 2 warten müssen:
+6. Provide a **placeholder image** before the split, so Groups 1/3/4 don't
+   have to wait on Group 2:
    ```
    docker build -t ghcr.io/<org>/<project>:dummy .
    docker push ghcr.io/<org>/<project>:dummy
    ```
-7. Definition of Done pro Gruppe fixieren (siehe unten) – **vor** dem Split.
-8. Gemeinsame Schnittstellen fixieren (siehe Tabelle unten) – **vor** dem Split.
+7. Nail down the **Definition of Done per group** (see below) - **before**
+   the split.
+8. Nail down the **shared interfaces** (see table below) - **before** the
+   split.
 
-### Sicherheit beim Runner-Zugriff auf die Zielsysteme
+### Securing the runner's access to target systems
 
-- SSH-Keys möglichst als **Deploy-Keys mit `command=`-Restriction** in
-  `authorized_keys`, z. B.:
+- Prefer SSH keys set up as **deploy keys with a `command=` restriction** in
+  `authorized_keys`, e.g.:
   ```
   command="/opt/workshop/bin/remote-deploy.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... deploy@runner
   ```
-  `remote-deploy.sh` wertet `$SSH_ORIGINAL_COMMAND` aus und erlaubt nur eine
-  feste Allowlist an Befehlen (pull/run des Images) statt freiem Shell-Zugriff.
-- **GitHub Environments** mit Protection Rules pro Cluster (`cluster-a`,
-  `cluster-b`, `luis`) statt eines repo-weiten Secrets – jedes Environment
-  bekommt eigene `CLUSTER_SSH_KEY`/Zugangsdaten.
-- Ein Runner mit Docker-Socket-Zugriff ist quasi root: wenn möglich
-  **rootless Docker** verwenden, den Runner nicht mit anderen Workloads
-  teilen.
-- GHCR-Package **privat** halten, Pull-Token mit möglichst engem Scope
-  (`read:packages` statt vollem PAT), Token nur über das jeweilige
-  Environment einschleusen (`GHCR_PULL_TOKEN`).
 
-## Gemeinsame Schnittstellen (vor dem Split fixiert)
+  `remote-deploy.sh` inspects `$SSH_ORIGINAL_COMMAND` and only allows a
+  fixed allowlist of commands (pull/run the image) instead of free shell
+  access.
+- Use **GitHub Environments** with protection rules per cluster
+  (`cluster-a`, `cluster-b`, `luis`) instead of one repo-wide secret - each
+  environment gets its own `CLUSTER_SSH_KEY`/credentials.
+- A runner with Docker socket access is effectively root: use **rootless
+  Docker** where possible, and don't share the runner with other workloads.
+- Keep the GHCR package **private**, use a pull token with as narrow a
+  scope as possible (`read:packages` instead of a full PAT), and inject the
+  token only via the relevant environment (`GHCR_PULL_TOKEN`).
 
-| Was | Format/Konvention |
+## Shared interfaces (fixed before the split)
+
+| What | Format/convention |
 |---|---|
-| Image-Naming | `ghcr.io/org/project:<git-sha>` |
-| Cluster-Bezeichner | wie in `config/clusters.json`: `cluster-a`, `cluster-b`, `luis` |
-| `deploy.sh` Aufruf | `./deploy.sh <cluster-name> <image-tag>` → Exit-Code 0/≠0 |
-| `verify.sh` Aufruf | liest `config/clusters.json`, gibt Statustabelle + Exit-Code zurück |
-| Deployment-Info-Format | JSON mit mind. `commit`, `image_tag`, `timestamp` (siehe `create-deployment-info.sh`) |
+| Image naming | `ghcr.io/org/project:<git-sha>` |
+| Cluster identifiers | as in `config/clusters.json`: `cluster-a`, `cluster-b`, `luis` |
+| `deploy.sh` call | `./deploy.sh <cluster-name> <image-tag>` → exit code 0/≠0 |
+| `verify.sh` call | reads `config/clusters.json`, returns a status table + exit code |
+| Deployment info format | JSON with at least `commit`, `image_tag`, `timestamp` (see `create-deployment-info.sh`) |
 
-### Exit-Codes `deploy.sh`
+### `deploy.sh` exit codes
 
-| Code | Bedeutung |
+| Code | Meaning |
 |---|---|
-| 0 | Erfolg |
-| 1 | Usage-/Konfigurationsfehler lokal |
-| 2 | unbekannter Cluster-Name/-Typ |
-| 3 | Cluster nicht erreichbar |
-| 4 | Remote-Befehl fehlgeschlagen |
+| 0 | success |
+| 1 | local usage/config error |
+| 2 | unknown cluster name/type |
+| 3 | cluster not reachable |
+| 4 | remote command failed |
 
-### Digest vs. Tag
+### Digest vs. tag
 
-`verify.sh` vergleicht standardmäßig **Tags** (einfach, aber Tags sind
-grundsätzlich veränderlich). Für eine belastbare Aussage "läuft wirklich
-derselbe Code" zusätzlich den **Digest** vergleichen:
+`verify.sh` compares **tags** by default (simple, but tags are mutable in
+principle). For a solid guarantee that "the same code is really running
+everywhere", also compare the **digest**:
 
 ```
-# Digest des gepushten Images ermitteln
+# read the digest of the pushed image
 docker buildx imagetools inspect ghcr.io/org/project:<sha>
 
-# lokal gebautes Image per Digest referenzieren
+# reference a locally built image by digest
 docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/org/project:<sha>
 ```
 
-`create-deployment-info.sh` unterstützt optional `IMAGE_DIGEST`, um den
-Digest mit ins Deployment-Info-JSON zu schreiben.
+`create-deployment-info.sh` optionally accepts `IMAGE_DIGEST` to record the
+digest in the deployment info JSON.
 
-## Gruppenaufteilung
+## Group breakdown
 
-### Gruppe 1: GitHub Actions & Multi-Cluster Selection
-Verantwortung: `workflow_dispatch`, Cluster-Auswahl (Checkboxen), Job-Conditions,
-Zusammenfassung am Ende des Runs. Siehe `.github/workflows/deploy.yml`.
+### Group 1: GitHub Actions & Multi-Cluster Selection
 
-**Definition of Done**
-- [ ] `workflow_dispatch` mit Inputs für Cluster-Auswahl (Cluster A/B, LUIS) ist definiert
-- [ ] Input „Build container" (ja/nein) funktioniert unabhängig von der Cluster-Auswahl
-- [ ] Pro Cluster ein Job mit `if:`-Condition, der nur bei Auswahl läuft
-- [ ] Jobs rufen die Skripte der anderen Gruppen mit den abgestimmten Parametern auf
-- [ ] Workflow läuft mindestens einmal End-to-End durch (auch mit Platzhaltern)
-- [ ] Fehler in einem Cluster-Job blockiert nicht die anderen Cluster-Jobs
-- [ ] Zusammenfassung am Ende zeigt Erfolg/Fehlschlag pro Cluster
-- [ ] Keine Secrets im Klartext im Workflow-File; Environments/Secrets korrekt referenziert
-
-### Gruppe 2: Containers & Reproducible Environments
-Verantwortung: `Dockerfile`, Image-Tags, GHCR-Push, Container starten,
-Docker ↔ Apptainer Unterschiede.
+Owns: `workflow_dispatch`, cluster selection (checkboxes), job conditions,
+end-of-run summary. See `.github/workflows/deploy.yml`.
 
 **Definition of Done**
-- [ ] `Dockerfile` baut lokal fehlerfrei (`docker build .`)
-- [ ] Image wird mit Git-SHA getaggt (`ghcr.io/org/project:<sha>`), nicht nur `latest`
-- [ ] Push nach GHCR funktioniert aus der Action heraus
-- [ ] Image ist per Digest referenzierbar, Auslesen dokumentiert
-- [ ] Container lässt sich lokal starten, `hello.py` läuft sichtbar durch
-- [ ] Kurzdoku: Docker ↔ Apptainer (mind. 3 Punkte: Daemon/root, Image-Format, Netzwerk/Namespaces)
-- [ ] Beispielbefehl für GHCR → `.sif` (`apptainer pull docker://...`) dokumentiert
-- [ ] Sichtbarkeit/Rechte des GHCR-Package geklärt (privat + welche Tokens dürfen pullen)
+- [ ] `workflow_dispatch` with inputs for cluster selection (Cluster A/B, LUIS) is defined
+- [ ] The "Build container" input (yes/no) works independently of cluster selection
+- [ ] Each cluster has its own job with an `if:` condition that only runs when selected
+- [ ] Jobs call the other groups' scripts with the agreed-upon parameters
+- [ ] The workflow runs end-to-end at least once (even with placeholders from other groups)
+- [ ] A failure in one cluster job doesn't block the other cluster jobs
+- [ ] The end-of-run summary shows success/failure per cluster
+- [ ] No secrets in plaintext in the workflow file; environments/secrets referenced correctly
 
-### Gruppe 3: Transport & Remote Execution
-Verantwortung: `scripts/deploy.sh`, SSH, optional `scripts/sync.sh`.
+### Group 2: Containers & Reproducible Environments
 
-**Definition of Done**
-- [ ] SSH-Verbindung zu Cluster A und LUIS erfolgreich getestet (Key-based)
-- [ ] `deploy.sh` mit klar dokumentierter Signatur `./deploy.sh <cluster-name> <image-tag>`
-- [ ] Skript unterscheidet intern Docker (Cluster A/B) vs. Apptainer (LUIS) korrekt
-- [ ] Pull + Run auf Zielsystem nachweisbar erfolgreich
-- [ ] Exit-Code eindeutig (0 = Erfolg, ≠0 = Fehler)
-- [ ] SSH-Zugriff eingeschränkt (`command=`-Restriction, kein voller Shell-Zugriff)
-- [ ] Optional: `rsync` für Source-Sync funktioniert, sauber getrennt von Docker-Deploy
-- [ ] Fehlerfälle behandelt: Cluster nicht erreichbar, Image nicht vorhanden
-
-### Gruppe 4: Version Tracking & Verification
-Verantwortung: `scripts/create-deployment-info.sh`, `scripts/verify.sh`.
+Owns: `Dockerfile`, image tags, GHCR push, starting the container, Docker
+vs. Apptainer differences.
 
 **Definition of Done**
-- [ ] `create-deployment-info.sh` erzeugt JSON mit Git-Commit, Image-Tag/Digest, Zeitstempel
-- [ ] `verify.sh` liest pro Cluster den tatsächlich laufenden Image-Tag aus
-- [ ] Vergleich Soll (aktueller Git-Commit) vs. Ist (pro Cluster) korrekt und lesbar
-- [ ] Statusausgabe eindeutig: ✓ aktuell / OUTDATED / „nicht erreichbar" als dritter Zustand
-- [ ] Skript funktioniert auch, wenn nur ein Teil der Cluster deployed wurde
-- [ ] Exit-Code spiegelt Gesamtstatus wider
-- [ ] Kurzdoku: wie wird „gleicher Code, gleiches Environment" geprüft (Tag- vs. Digest-Vergleich)
+- [ ] `Dockerfile` builds cleanly locally (`docker build .`)
+- [ ] Image is tagged with the git SHA (`ghcr.io/org/project:<sha>`), not just `latest`
+- [ ] Push to GHCR works from the Action
+- [ ] Image can be referenced by digest, and reading it out is documented
+- [ ] Container can be started locally, `hello.py` visibly runs through
+- [ ] Short write-up: Docker vs. Apptainer (at least 3 points: daemon/root, image format, network/namespaces)
+- [ ] Example command for GHCR → `.sif` (`apptainer pull docker://...`) documented
+- [ ] GHCR package visibility/permissions clarified (private + which tokens may pull)
+
+### Group 3: Transport & Remote Execution
+
+Owns: `scripts/deploy.sh`, SSH, optionally `scripts/sync.sh`.
+
+**Definition of Done**
+- [ ] SSH connection to Cluster A and LUIS successfully tested (key-based)
+- [ ] `deploy.sh` with a clearly documented signature: `./deploy.sh <cluster-name> <image-tag>`
+- [ ] Script correctly distinguishes Docker (Cluster A/B) vs. Apptainer (LUIS) internally
+- [ ] Pull + run on the target system demonstrably works
+- [ ] Exit code is unambiguous (0 = success, ≠0 = failure)
+- [ ] SSH access is restricted (`command=` restriction, no full shell access)
+- [ ] Optional: `rsync` for source sync works and is cleanly separated from the Docker deploy logic
+- [ ] Failure cases handled: cluster unreachable, image not found
+
+### Group 4: Version Tracking & Verification
+
+Owns: `scripts/create-deployment-info.sh`, `scripts/verify.sh`.
+
+**Definition of Done**
+- [ ] `create-deployment-info.sh` produces JSON with git commit, image tag/digest, timestamp
+- [ ] `verify.sh` reads the actually running image tag for each cluster
+- [ ] Expected (current git commit) vs. actual (per cluster) comparison is correct and readable
+- [ ] Status output is unambiguous: ✓ up to date / OUTDATED / "unreachable" as a third state
+- [ ] Script works even when only some clusters have been deployed
+- [ ] Exit code reflects the overall status
+- [ ] Short write-up: how "same code, same environment" is actually verified (tag vs. digest comparison)
 
 ## Integration
 
-Nach der Gruppenarbeit: gemeinsame Phase, in der alle vier Teile gegen den
-echten Workflow (`deploy.yml`) integriert werden – jede Gruppe ersetzt ihren
-Platzhalter durch die eigene Implementierung, danach ein End-to-End-Lauf
-mit allen Clustern.
+After group work: a shared phase where all four parts are integrated
+against the real workflow (`deploy.yml`) - each group replaces its
+placeholder with its own implementation, followed by an end-to-end run
+across all clusters.
 
-## Zeitplan
+## Timeline
 
-_TODO: Zeitplan für den Workshop-Tag ergänzen (Vorbereitung, Gruppenarbeit,
-Integration, Abschluss)._
+_TODO: add a timeline for the workshop day (preparation, group work,
+integration, wrap-up)._

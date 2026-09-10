@@ -4,7 +4,7 @@
 # Reads config/clusters.json and checks, for every cluster, which image tag
 # is actually running vs. the expected tag (default: current git commit
 # short-sha). Prints a status table and sets the exit code to reflect the
-# overall result - so Gruppe 1's workflow can mark a run as failed.
+# overall result - so Group 1's workflow can mark a run as failed.
 #
 # NOTE on "same code, same environment": this compares the image *tag*,
 # which is convenient but mutable in principle. For a stronger guarantee,
