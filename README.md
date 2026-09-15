@@ -62,6 +62,7 @@ Note: the original diagram's `cluster config/` became `cluster-config/`
    `jq`, `ssh`, `rsync`.
 3. **Prepare target systems** - two local Docker containers standing in for
    Cluster A/B:
+
    ```
    ssh-keygen -t ed25519 -f ~/.ssh/id_cluster_a -N ""
    ./cluster-config/cluster-a-docker.sh ~/.ssh/id_cluster_a.pub
@@ -71,12 +72,14 @@ Note: the original diagram's `cluster config/` became `cluster-config/`
    Lock down the runner's access to the containers (see below).
 4. Fill in `config/clusters.json` with real hosts/users.
 5. **Test SSH**:
+
    ```
    ssh -p 2201 -i ~/.ssh/id_cluster_a deploy@127.0.0.1
    ./scripts/preflight.sh
    ```
 6. Provide a **placeholder image** before the split, so Groups 1/3/4 don't
    have to wait on Group 2:
+
    ```
    docker build -t ghcr.io/<org>/<project>:dummy .
    docker push ghcr.io/<org>/<project>:dummy
@@ -90,6 +93,7 @@ Note: the original diagram's `cluster config/` became `cluster-config/`
 
 - Prefer SSH keys set up as **deploy keys with a `command=` restriction** in
   `authorized_keys`, e.g.:
+
   ```
   command="/opt/workshop/bin/remote-deploy.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... deploy@runner
   ```
@@ -108,23 +112,23 @@ Note: the original diagram's `cluster config/` became `cluster-config/`
 
 ## Shared interfaces (fixed before the split)
 
-| What | Format/convention |
-|---|---|
-| Image naming | `ghcr.io/org/project:<git-sha>` |
-| Cluster identifiers | as in `config/clusters.json`: `cluster-a`, `cluster-b`, `luis` |
-| `deploy.sh` call | `./deploy.sh <cluster-name> <image-tag>` → exit code 0/≠0 |
-| `verify.sh` call | reads `config/clusters.json`, returns a status table + exit code |
-| Deployment info format | JSON with at least `commit`, `image_tag`, `timestamp` (see `create-deployment-info.sh`) |
+| What                   | Format/convention                                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------------------- |
+| Image naming           | `ghcr.io/org/project:<git-sha>`                                                              |
+| Cluster identifiers    | as in`config/clusters.json`: `cluster-a`, `cluster-b`, `luis`                          |
+| `deploy.sh` call     | `./deploy.sh <cluster-name> <image-tag>` → exit code 0/≠0                                  |
+| `verify.sh` call     | reads`config/clusters.json`, returns a status table + exit code                              |
+| Deployment info format | JSON with at least`commit`, `image_tag`, `timestamp` (see `create-deployment-info.sh`) |
 
 ### `deploy.sh` exit codes
 
-| Code | Meaning |
-|---|---|
-| 0 | success |
-| 1 | local usage/config error |
-| 2 | unknown cluster name/type |
-| 3 | cluster not reachable |
-| 4 | remote command failed |
+| Code | Meaning                   |
+| ---- | ------------------------- |
+| 0    | success                   |
+| 1    | local usage/config error  |
+| 2    | unknown cluster name/type |
+| 3    | cluster not reachable     |
+| 4    | remote command failed     |
 
 ### Digest vs. tag
 
@@ -151,6 +155,7 @@ Owns: `workflow_dispatch`, cluster selection (checkboxes), job conditions,
 end-of-run summary. See `.github/workflows/deploy.yml`.
 
 **Definition of Done**
+
 - [ ] `workflow_dispatch` with inputs for cluster selection (Cluster A/B, LUIS) is defined
 - [ ] The "Build container" input (yes/no) works independently of cluster selection
 - [ ] Each cluster has its own job with an `if:` condition that only runs when selected
@@ -166,6 +171,7 @@ Owns: `Dockerfile`, image tags, GHCR push, starting the container, Docker
 vs. Apptainer differences.
 
 **Definition of Done**
+
 - [ ] `Dockerfile` builds cleanly locally (`docker build .`)
 - [ ] Image is tagged with the git SHA (`ghcr.io/org/project:<sha>`), not just `latest`
 - [ ] Push to GHCR works from the Action
@@ -180,6 +186,7 @@ vs. Apptainer differences.
 Owns: `scripts/deploy.sh`, SSH, optionally `scripts/sync.sh`.
 
 **Definition of Done**
+
 - [ ] SSH connection to Cluster A and LUIS successfully tested (key-based)
 - [ ] `deploy.sh` with a clearly documented signature: `./deploy.sh <cluster-name> <image-tag>`
 - [ ] Script correctly distinguishes Docker (Cluster A/B) vs. Apptainer (LUIS) internally
@@ -194,6 +201,7 @@ Owns: `scripts/deploy.sh`, SSH, optionally `scripts/sync.sh`.
 Owns: `scripts/create-deployment-info.sh`, `scripts/verify.sh`.
 
 **Definition of Done**
+
 - [ ] `create-deployment-info.sh` produces JSON with git commit, image tag/digest, timestamp
 - [ ] `verify.sh` reads the actually running image tag for each cluster
 - [ ] Expected (current git commit) vs. actual (per cluster) comparison is correct and readable

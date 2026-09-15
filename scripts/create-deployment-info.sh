@@ -3,8 +3,8 @@
 #
 # Writes a small JSON file describing what was just built/deployed:
 # commit, image_tag, digest (optional, via IMAGE_DIGEST env var) and a UTC
-# timestamp. Used by Group 4 to compare "Soll" (this file / current commit)
-# against "Ist" (verify.sh's view of each cluster).
+# timestamp. Used by Group 4 to compare "expected" (this file / current
+# commit) against "actual" (verify.sh's view of each cluster).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
