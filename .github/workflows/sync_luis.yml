@@ -12,5 +12,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/workshop-keys
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/workshop-keys/runner_key
+          chmod 600 ~/workshop-keys/runner_key
+
       - name: Sync to LUIS
         run: ./scripts/sync.sh luis

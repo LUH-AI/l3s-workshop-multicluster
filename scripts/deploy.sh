@@ -27,6 +27,25 @@ USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
 KEY=$(jq -r ".\"$CLUSTER_NAME\".key" "$CONFIG_FILE" | sed "s|~|$HOME|")
 TYPE=$(jq -r ".\"$CLUSTER_NAME\".type" "$CONFIG_FILE")
 
+# Optional: authenticate against a private GHCR package before pulling.
+# Only needed on a real, separate cluster - the local Docker simulators
+# share the host's docker.sock, so they inherit whatever `docker login` you
+# already did on your laptop. If GHCR_USER/GHCR_TOKEN aren't set (e.g. your
+# package is public), this is skipped entirely.
+if [[ -n "${GHCR_TOKEN:-}" && -n "${GHCR_USER:-}" ]]; then
+  echo "==> Logging in to ghcr.io on $CLUSTER_NAME as $GHCR_USER"
+  if [[ "$TYPE" == "docker" ]]; then
+    ssh -p "$PORT" -i "$KEY" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+      "${USER}@${HOST}" "docker login ghcr.io -u '${GHCR_USER}' --password-stdin" <<<"$GHCR_TOKEN"
+  elif [[ "$TYPE" == "apptainer" ]]; then
+    # Apptainer's registry login is modeled after `docker login`; verify
+    # --password-stdin is supported by the apptainer version on your target
+    # if this fails.
+    ssh -p "$PORT" -i "$KEY" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+      "${USER}@${HOST}" "apptainer registry login --username '${GHCR_USER}' --password-stdin docker://ghcr.io" <<<"$GHCR_TOKEN"
+  fi
+fi
+
 echo "Deploying $REGISTRY:$IMAGE_TAG to $CLUSTER_NAME ($TYPE) at $HOST:$PORT ..."
 
 if [[ "$TYPE" == "docker" ]]; then

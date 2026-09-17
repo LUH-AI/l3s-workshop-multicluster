@@ -47,7 +47,15 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/workshop-keys
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/workshop-keys/runner_key
+          chmod 600 ~/workshop-keys/runner_key
       - run: ./scripts/deploy.sh cluster-a ${{ needs.build.outputs.tag }}
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
   deploy-cluster-b:
     needs: build
@@ -55,7 +63,15 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/workshop-keys
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/workshop-keys/runner_key
+          chmod 600 ~/workshop-keys/runner_key
       - run: ./scripts/deploy.sh cluster-b ${{ needs.build.outputs.tag }}
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
   verify:
     needs: [build, deploy-cluster-a, deploy-cluster-b]
@@ -63,6 +79,11 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/workshop-keys
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/workshop-keys/runner_key
+          chmod 600 ~/workshop-keys/runner_key
       - run: ./scripts/verify.sh ${{ needs.build.outputs.tag }}
 
   summary:

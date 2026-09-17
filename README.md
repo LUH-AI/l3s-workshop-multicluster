@@ -70,8 +70,12 @@ can test anything.
    creating a package under someone else's namespace)
 3. Create a classic GitHub PAT with `write:packages` + `repo` scopes (a
    fine-grained token does not reliably work with GHCR) and store it as the
-   `GHCR_TOKEN` secret in your fork's repo settings
-4. Generate a dedicated SSH key: `ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""`
+   `GHCR_TOKEN` secret in your fork's repo settings (Settings -> Secrets and
+   variables -> Actions)
+4. Generate a dedicated SSH key: `ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""` -
+   store its **private** key content as the `SSH_PRIVATE_KEY` secret too (every
+   workflow writes it to `~/workshop-keys/runner_key` at the start of each
+   run, so this works even on a freshly set up runner)
 5. Register a self-hosted runner in your fork (Settings -> Actions ->
    Runners) and keep it running (`./run.sh`, or install it as a service)
 
@@ -100,6 +104,21 @@ Build the two local simulators with:
 ./cluster-config/cluster-a-docker.sh ~/workshop-keys/runner_key.pub
 ./cluster-config/cluster-b-docker.sh ~/workshop-keys/runner_key.pub
 ```
+
+## Secrets
+
+Two repo secrets (Settings -> Secrets and variables -> Actions in your
+fork), both consumed by the workflows, not committed anywhere:
+
+| Secret | Used for | Required? |
+|---|---|---|
+| `GHCR_TOKEN` | `docker login` when pushing the build in `deploy.yml`; optionally reused by `deploy.sh` to log in on the *target* cluster before pulling | Always, for the push. For pulling: only if your GHCR package is **private** - the simplest alternative is making it public, then no pull-side auth is needed at all |
+| `SSH_PRIVATE_KEY` | written to `~/workshop-keys/runner_key` at the start of every job that needs SSH (deploy, verify, sync) | Recommended, so the workflow doesn't depend on that file already existing on whatever machine runs your runner |
+
+The local Docker simulators (Cluster A/B) never need pull-side auth: they
+share the host's `docker.sock`, so they inherit whatever `docker login` you
+already ran on your laptop. A genuinely separate remote cluster (a real
+Cluster A/B, or LUIS) does need it if its package is private.
 
 ## Work packages & Definition of Done
 
