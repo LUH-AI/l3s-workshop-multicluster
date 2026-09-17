@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail  # kein -e: ein fehlgeschlagenes Cluster soll die anderen nicht abbrechen
+set -uo pipefail
 
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
 REGISTRY="ghcr.io/evavormschlag/project"
@@ -19,12 +19,11 @@ OVERALL_STATUS=0
 
 for CLUSTER_NAME in $(jq -r 'keys[]' "$CONFIG_FILE"); do
   HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CONFIG_FILE")
-  PORT=$(jq -r ".\"$CLUSTER_NAME\".port" "$CONFIG_FILE")
+  PORT=$(jq -r ".\"$CLUSTER_NAME\".port // 22" "$CONFIG_FILE")
   USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
   KEY=$(jq -r ".\"$CLUSTER_NAME\".key" "$CONFIG_FILE" | sed "s|~|$HOME|")
   TYPE=$(jq -r ".\"$CLUSTER_NAME\".type" "$CONFIG_FILE")
 
-  # Erreichbarkeit zuerst prüfen, separat von "outdated"
   if ! ssh -p "$PORT" -i "$KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
        "${USER}@${HOST}" "echo ok" &> /dev/null; then
     printf "%-12s %-15s %s\n" "$CLUSTER_NAME" "-" "UNREACHABLE ✗"

@@ -20,7 +20,7 @@ rsync -avz --delete \
   -e "ssh -i $KEY -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
   --exclude '.git' \
   --exclude '__pycache__' \
-  ./ \
+  "$(dirname "$0")/../" \
   "${USER}@${HOST}:${REMOTE_PATH}/"
 
 echo "✓ Sync zu $CLUSTER_NAME abgeschlossen"
