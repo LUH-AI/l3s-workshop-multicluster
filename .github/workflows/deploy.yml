@@ -1,145 +1,62 @@
-name: Deploy
+name: Multi-Cluster Deploy
 
 on:
   workflow_dispatch:
     inputs:
-      cluster_a:
-        description: "Cluster A"
+      deploy_cluster_a:
+        description: 'Cluster A'
         type: boolean
         default: true
-      cluster_b:
-        description: "Cluster B"
-        type: boolean
-        default: true
-      luis:
-        description: "LUIS"
+      deploy_cluster_b:
+        description: 'Cluster B'
         type: boolean
         default: false
       build_container:
-        description: "Build container"
+        description: 'Build container'
         type: boolean
         default: true
 
-concurrency:
-  group: deploy-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   build:
-    name: Build container
     if: ${{ inputs.build_container }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    runs-on: self-hosted
     outputs:
-      image_tag: ${{ steps.vars.outputs.image_tag }}
-      image: ${{ steps.vars.outputs.image }}
+      tag: ${{ steps.vars.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
-      - id: vars
+      - name: Set image tag
+        id: vars
+        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        run: docker build -t ghcr.io/evavormschlag/project:${{ steps.vars.outputs.tag }} .
+
+      - name: Push image
         run: |
-          IMAGE_TAG="$(git rev-parse --short HEAD)"
-          IMAGE="ghcr.io/${{ github.repository }}:${IMAGE_TAG}"
-          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          build-args: |
-            GIT_SHA=${{ steps.vars.outputs.image_tag }}
-          tags: ${{ steps.vars.outputs.image }}
-
-      - name: Resolve digest
-        run: docker buildx imagetools inspect "${{ steps.vars.outputs.image }}"
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker push ghcr.io/evavormschlag/project:${{ steps.vars.outputs.tag }}
 
   deploy-cluster-a:
-    name: Deploy Cluster A
     needs: build
-    if: ${{ always() && inputs.cluster_a && !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
-    environment: cluster-a
+    if: ${{ inputs.deploy_cluster_a }}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.CLUSTER_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-      - name: Run deploy.sh
-        env:
-          SSH_KEY: ~/.ssh/deploy_key
-          GHCR_ORG: ${{ github.repository_owner }}
-          GHCR_PROJECT: ${{ github.event.repository.name }}
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-        run: ./deploy.sh cluster-a "${{ needs.build.outputs.image_tag || 'dummy' }}"
+      - run: ./scripts/deploy.sh cluster-a ${{ needs.build.outputs.tag }}
 
   deploy-cluster-b:
-    name: Deploy Cluster B
     needs: build
-    if: ${{ always() && inputs.cluster_b && !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
-    environment: cluster-b
+    if: ${{ inputs.deploy_cluster_b }}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.CLUSTER_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-      - name: Run deploy.sh
-        env:
-          SSH_KEY: ~/.ssh/deploy_key
-          GHCR_ORG: ${{ github.repository_owner }}
-          GHCR_PROJECT: ${{ github.event.repository.name }}
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-        run: ./deploy.sh cluster-b "${{ needs.build.outputs.image_tag || 'dummy' }}"
+      - run: ./scripts/deploy.sh cluster-b ${{ needs.build.outputs.tag }}
 
-  deploy-luis:
-    name: Deploy LUIS
-    needs: build
-    if: ${{ always() && inputs.luis && !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
-    environment: luis
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.CLUSTER_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-      - name: Run deploy.sh
-        env:
-          SSH_KEY: ~/.ssh/deploy_key
-          GHCR_ORG: ${{ github.repository_owner }}
-          GHCR_PROJECT: ${{ github.event.repository.name }}
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-        run: ./deploy.sh luis "${{ needs.build.outputs.image_tag || 'dummy' }}"
-
-  summary:
-    name: Summary
-    needs: [build, deploy-cluster-a, deploy-cluster-b, deploy-luis]
+  verify:
+    needs: [build, deploy-cluster-a, deploy-cluster-b]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
-      - name: Write job summary
-        run: |
-          {
-            echo "### Deploy summary"
-            echo
-            echo "| Job | Result |"
-            echo "|---|---|"
-            echo "| Build | ${{ needs.build.result }} |"
-            echo "| Cluster A | ${{ needs.deploy-cluster-a.result }} |"
-            echo "| Cluster B | ${{ needs.deploy-cluster-b.result }} |"
-            echo "| LUIS | ${{ needs.deploy-luis.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v4
+      - run: ./scripts/verify.sh ${{ needs.build.outputs.tag }}

@@ -1,75 +1,64 @@
 #!/usr/bin/env bash
-# Usage: ./verify.sh [expected-image-tag]
-#
-# Reads config/clusters.json and checks, for every cluster, which image tag
-# is actually running vs. the expected tag (default: current git commit
-# short-sha). Prints a status table and sets the exit code to reflect the
-# overall result - so Group 1's workflow can mark a run as failed.
-#
-# NOTE on "same code, same environment": this compares the image *tag*,
-# which is convenient but mutable in principle. For a stronger guarantee,
-# compare digests instead - see README.md ("Digest vs. Tag").
-#
-# Exit code: 0 = all clusters OK, 1 = at least one mismatch/unreachable/missing.
-set -euo pipefail
+set -uo pipefail  # kein -e: ein fehlgeschlagenes Cluster soll die anderen nicht abbrechen
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLUSTERS_FILE="$REPO_ROOT/config/clusters.json"
+CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
+REGISTRY="ghcr.io/evavormschlag/project"
+EXPECTED_TAG="${1:-$(git rev-parse --short HEAD)}"
 
-command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; exit 1; }
-[[ -f "$CLUSTERS_FILE" ]] || { echo "ERROR: cluster config not found: $CLUSTERS_FILE" >&2; exit 1; }
+if ! command -v jq &> /dev/null; then
+  echo "Fehler: jq ist nicht installiert (brew install jq)"
+  exit 1
+fi
 
-EXPECTED_TAG="${1:-$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
-
-SSH_KEY="${SSH_KEY:-}"
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
-[[ -n "$SSH_KEY" ]] && SSH_OPTS+=(-i "$SSH_KEY")
-
-echo "Expected (current git commit): ${EXPECTED_TAG}"
-echo
-printf '%-12s %-10s %-15s %s\n' "CLUSTER" "TYPE" "RUNNING" "STATUS"
+echo "Erwarteter Tag (aktueller Git-Commit): $EXPECTED_TAG"
+echo ""
+printf "%-12s %-15s %s\n" "CLUSTER" "LAUFENDER TAG" "STATUS"
+printf "%-12s %-15s %s\n" "-------" "-------------" "------"
 
 OVERALL_STATUS=0
 
-while IFS=$'\t' read -r NAME TYPE HOST PORT USER_NAME; do
-  TARGET_OPTS=("${SSH_OPTS[@]}" -p "$PORT")
+for CLUSTER_NAME in $(jq -r 'keys[]' "$CONFIG_FILE"); do
+  HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CONFIG_FILE")
+  PORT=$(jq -r ".\"$CLUSTER_NAME\".port" "$CONFIG_FILE")
+  USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
+  KEY=$(jq -r ".\"$CLUSTER_NAME\".key" "$CONFIG_FILE" | sed "s|~|$HOME|")
+  TYPE=$(jq -r ".\"$CLUSTER_NAME\".type" "$CONFIG_FILE")
 
-  if ! ssh "${TARGET_OPTS[@]}" "${USER_NAME}@${HOST}" true 2>/dev/null; then
-    printf '%-12s %-10s %-15s %s\n' "$NAME" "$TYPE" "-" "UNREACHABLE"
+  # Erreichbarkeit zuerst prüfen, separat von "outdated"
+  if ! ssh -p "$PORT" -i "$KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+       "${USER}@${HOST}" "echo ok" &> /dev/null; then
+    printf "%-12s %-15s %s\n" "$CLUSTER_NAME" "-" "UNREACHABLE ✗"
     OVERALL_STATUS=1
     continue
   fi
 
-  case "$TYPE" in
-    docker)
-      CONTAINER_NAME="$(jq -r --arg n "$NAME" '.clusters[] | select(.name==$n) | .container_name // "multicluster-workshop"' "$CLUSTERS_FILE")"
-      RUNNING_IMAGE="$(ssh "${TARGET_OPTS[@]}" "${USER_NAME}@${HOST}" \
-        "docker inspect --format='{{.Config.Image}}' '$CONTAINER_NAME' 2>/dev/null" || true)"
-      ;;
-    apptainer)
-      SIF_PATH="$(jq -r --arg n "$NAME" '.clusters[] | select(.name==$n) | .sif_path // "~/multicluster-workshop.sif"' "$CLUSTERS_FILE")"
-      RUNNING_IMAGE="$(ssh "${TARGET_OPTS[@]}" "${USER_NAME}@${HOST}" \
-        "apptainer inspect --json '$SIF_PATH' 2>/dev/null" \
-        | jq -r '.data.attributes.deffile // empty' \
-        | grep -o 'From: docker://[^ ]*' | sed 's#From: docker://##' || true)"
-      ;;
-    *)
-      RUNNING_IMAGE=""
-      ;;
-  esac
+  if [[ "$TYPE" == "docker" ]]; then
+    RUNNING_TAG=$(ssh -p "$PORT" -i "$KEY" "${USER}@${HOST}" \
+      "docker images --format '{{.Repository}}:{{.Tag}}\t{{.CreatedAt}}' | grep '^${REGISTRY}:' | sort -k2 -r | head -1 | cut -f1 | cut -d: -f2" 2>/dev/null)
+  elif [[ "$TYPE" == "apptainer" ]]; then
+    LATEST_SIF=$(ssh -p "$PORT" -i "$KEY" "${USER}@${HOST}" \
+      "ls -t ~/project_*.sif 2>/dev/null | head -1" 2>/dev/null)
+    RUNNING_TAG=$(echo "$LATEST_SIF" | sed -E 's/.*project_(.+)\.sif/\1/')
+  else
+    RUNNING_TAG=""
+  fi
 
-  RUNNING_TAG="${RUNNING_IMAGE##*:}"
-
-  if [[ -z "$RUNNING_IMAGE" ]]; then
-    printf '%-12s %-10s %-15s %s\n' "$NAME" "$TYPE" "-" "NOT DEPLOYED"
+  if [[ -z "$RUNNING_TAG" ]]; then
+    printf "%-12s %-15s %s\n" "$CLUSTER_NAME" "-" "NO DEPLOYMENT ✗"
     OVERALL_STATUS=1
   elif [[ "$RUNNING_TAG" == "$EXPECTED_TAG" ]]; then
-    printf '%-12s %-10s %-15s %s\n' "$NAME" "$TYPE" "$RUNNING_TAG" "OK"
+    printf "%-12s %-15s %s\n" "$CLUSTER_NAME" "$RUNNING_TAG" "✓"
   else
-    printf '%-12s %-10s %-15s %s\n' "$NAME" "$TYPE" "$RUNNING_TAG" "OUTDATED (expected $EXPECTED_TAG)"
+    printf "%-12s %-15s %s\n" "$CLUSTER_NAME" "$RUNNING_TAG" "OUTDATED ✗"
     OVERALL_STATUS=1
   fi
-done < <(jq -r '.clusters[] | [.name, .type, .host, (.port // 22), .user] | @tsv' "$CLUSTERS_FILE")
+done
+
+echo ""
+if [[ $OVERALL_STATUS -eq 0 ]]; then
+  echo "Alle Cluster auf dem aktuellen Stand."
+else
+  echo "Mindestens ein Cluster ist nicht aktuell oder nicht erreichbar."
+fi
 
 exit $OVERALL_STATUS
