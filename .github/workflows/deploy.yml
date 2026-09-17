@@ -10,7 +10,7 @@ on:
       deploy_cluster_b:
         description: 'Cluster B'
         type: boolean
-        default: false
+        default: true
       build_container:
         description: 'Build container'
         type: boolean
@@ -29,17 +29,21 @@ jobs:
         id: vars
         run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
+      # Uses github.repository_owner (= your own username in your fork), so
+      # nothing here needs manual editing - unlike REGISTRY in
+      # scripts/deploy.sh and scripts/verify.sh, which you do have to set
+      # to your own username (see README / WP0).
       - name: Build image
-        run: docker build -t ghcr.io/evavormschlag/project:${{ steps.vars.outputs.tag }} .
+        run: docker build -t ghcr.io/${{ github.repository_owner }}/project:${{ steps.vars.outputs.tag }} .
 
       - name: Push image
         run: |
           echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker push ghcr.io/evavormschlag/project:${{ steps.vars.outputs.tag }}
+          docker push ghcr.io/${{ github.repository_owner }}/project:${{ steps.vars.outputs.tag }}
 
   deploy-cluster-a:
     needs: build
-    if: ${{ inputs.deploy_cluster_a }}
+    if: ${{ always() && inputs.deploy_cluster_a && !failure() && !cancelled() }}
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +51,7 @@ jobs:
 
   deploy-cluster-b:
     needs: build
-    if: ${{ inputs.deploy_cluster_b }}
+    if: ${{ always() && inputs.deploy_cluster_b && !failure() && !cancelled() }}
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -60,3 +64,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/verify.sh ${{ needs.build.outputs.tag }}
+
+  summary:
+    needs: [build, deploy-cluster-a, deploy-cluster-b, verify]
+    if: always()
+    runs-on: self-hosted
+    steps:
+      - name: Write job summary
+        run: |
+          {
+            echo "### Deploy summary"
+            echo
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "| Build | ${{ needs.build.result }} |"
+            echo "| Cluster A | ${{ needs.deploy-cluster-a.result }} |"
+            echo "| Cluster B | ${{ needs.deploy-cluster-b.result }} |"
+            echo "| Verify | ${{ needs.verify.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

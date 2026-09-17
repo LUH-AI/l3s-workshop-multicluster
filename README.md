@@ -1,28 +1,32 @@
 # Multicluster Workshop
 
-A deployment pipeline that builds a container image from a private GitHub
-repo via GitHub Actions, pushes it to GHCR, and rolls it out to multiple
-heterogeneous target systems (two Docker clusters + LUIS via Apptainer).
+Seamless ML experiment deployment from laptop to HPC clusters. A 3-4 hour
+hands-on workshop where small groups build a lightweight, modular pipeline
+that builds a container image, pushes it to GHCR, and deploys it to two
+local Docker "clusters" plus (optionally) a real HPC cluster (LUIS, via
+Apptainer).
+
+## Model: everyone forks, everyone runs their own runner
+
+This repo is public for the duration of the workshop. There's no shared
+infrastructure: each participant **forks** it, runs their **own**
+self-hosted GitHub Actions runner on their own laptop, and pushes to their
+**own** GHCR namespace. Nobody shares credentials or namespaces with anyone
+else - see WP0 below.
 
 ## Architecture
 
 ```
-                       GitHub
-                         │
-                    private repo
-                         │
-              ┌──────────┴──────────┐
-              │                     │
-        Build Docker Image      Source Code
-              │                     │
-              ▼                     │
-            GHCR                    │
-      ghcr.io/org/project           │
-              │                     │
-        ┌─────┼──────────┐          │
-        ▼     ▼          ▼          │
- Cluster A  Cluster B    LUIS ◄─────┘
- Docker     Docker     Apptainer
+Cloud services
+  GitHub repo (private/your fork) --> GitHub Actions (build+push) --> GHCR (ghcr.io/<you>/project)
+                    ^
+                    | git push
+Local machine (your laptop)
+  Self-hosted runner (Docker + Actions) --> deploy scripts (deploy · sync · verify)
+                                                  | SSH deploy              ^ image pull
+                                                  v                        |
+Target clusters
+  Cluster A (Docker, local sim)   Cluster B (Docker, local sim)   LUIS (Apptainer, HPC)
 ```
 
 ## Repo structure
@@ -30,194 +34,150 @@ heterogeneous target systems (two Docker clusters + LUIS via Apptainer).
 ```
 multicluster-workshop/
 ├── .github/workflows/
-│   ├── deploy.yml          # workflow_dispatch, cluster selection, build + deploy
-│   └── health.yml          # scheduled/manual verify run without deploying
+│   ├── deploy.yml          # workflow_dispatch: build + deploy to Cluster A/B
+│   ├── health.yml          # manual verify run (no deploy)
+│   ├── sync_luis.yml       # on push to main: rsync code to LUIS (WP5)
+│   └── test_runner.yml     # minimal smoke test for your self-hosted runner
 ├── config/
-│   └── clusters.json       # central cluster definition (name, type, host, ...)
+│   └── clusters.json       # cluster-name -> {host, port, user, key, type, ...}
 ├── scripts/
-│   ├── deploy.sh           # ./deploy.sh <cluster-name> <image-tag>
-│   ├── verify.sh           # expected-vs-actual comparison across all clusters
-│   ├── create-deployment-info.sh
-│   ├── preflight.sh        # checks local tooling + SSH reachability
-│   └── sync.sh             # optional rsync of src/ (kept separate from image deploy)
+│   ├── deploy.sh           # ./scripts/deploy.sh <cluster-name> <image-tag>
+│   ├── verify.sh           # ./scripts/verify.sh [tag] - expected vs. actual per cluster
+│   ├── sync.sh             # ./scripts/sync.sh <cluster-name> - rsync source (default: luis)
+│   ├── preflight.sh        # local tooling + SSH reachability checks
+│   └── create-deployment-info.sh  # optional: commit/tag/timestamp JSON (not wired into CI)
 ├── cluster-config/
-│   ├── local-docker.sh     # generic local test target (sshd + docker)
-│   ├── cluster-a-docker.sh # spin up the Cluster A stand-in locally
-│   └── luis-apptainer.sh   # test pull+run against a real Apptainer system
-├── src/hello.py
-├── deploy.sh                # wrapper -> scripts/deploy.sh (so `./deploy.sh ...` works)
+│   ├── local-docker.sh     # generic local Docker "cluster" node (sshd + docker CLI)
+│   ├── cluster-a-docker.sh # spin up Cluster A (port 2222, user clustera)
+│   ├── cluster-b-docker.sh # spin up Cluster B (port 2223, user clusterb)
+│   └── luis-apptainer.sh   # test pull+run on a real LUIS login node
+├── src/hello.py             # placeholder workload (WP6 replaces this with PyExperimenter)
+├── deploy.sh                 # wrapper -> scripts/deploy.sh (so `./deploy.sh ...` works too)
 ├── version.txt
 ├── requirements.txt
 └── Dockerfile
 ```
 
-Note: the original diagram's `cluster config/` became `cluster-config/`
-(directory names can't contain spaces).
+## WP0: individual setup (do this before group work starts)
 
-## Preparation
+Not a group task - everyone does this on their own first, otherwise nobody
+can test anything.
 
-1. **Workshop repo**: create/push this repo as a private GitHub repo.
-2. **Prepare the runner**: a dedicated GitHub Actions runner (self-hosted or
-   GitHub-hosted, see the security section below), with access to `docker`,
-   `jq`, `ssh`, `rsync`.
-3. **Prepare target systems** - two local Docker containers standing in for
-   Cluster A/B:
+1. Fork this repo, clone your fork
+2. In `scripts/deploy.sh` and `scripts/verify.sh`, change
+   `REGISTRY="ghcr.io/<org>/project"` to your own GitHub username - skip
+   this and pushes fail with `permission_denied: create_package` (you'd be
+   creating a package under someone else's namespace)
+3. Create a classic GitHub PAT with `write:packages` + `repo` scopes (a
+   fine-grained token does not reliably work with GHCR) and store it as the
+   `GHCR_TOKEN` secret in your fork's repo settings
+4. Generate a dedicated SSH key: `ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""`
+5. Register a self-hosted runner in your fork (Settings -> Actions ->
+   Runners) and keep it running (`./run.sh`, or install it as a service)
 
-   ```
-   ssh-keygen -t ed25519 -f ~/.ssh/id_cluster_a -N ""
-   ./cluster-config/cluster-a-docker.sh ~/.ssh/id_cluster_a.pub
-   # cluster-b analog: copy/adjust local-docker.sh cluster-b <port> <pubkey>
-   ```
+**Definition of Done:** `docker ps` works, `docker login ghcr.io` with your
+token works, a test push to `ghcr.io/<you>/project:test` works, the runner
+shows "Idle", and `.github/workflows/test_runner.yml` runs successfully.
 
-   Lock down the runner's access to the containers (see below).
-4. Fill in `config/clusters.json` with real hosts/users.
-5. **Test SSH**:
+## Cluster config (`config/clusters.json`)
 
-   ```
-   ssh -p 2201 -i ~/.ssh/id_cluster_a deploy@127.0.0.1
-   ./scripts/preflight.sh
-   ```
-6. Provide a **placeholder image** before the split, so Groups 1/3/4 don't
-   have to wait on Group 2:
+One entry per cluster, keyed by name:
 
-   ```
-   docker build -t ghcr.io/<org>/<project>:dummy .
-   docker push ghcr.io/<org>/<project>:dummy
-   ```
-7. Nail down the **Definition of Done per group** (see below) - **before**
-   the split.
-8. Nail down the **shared interfaces** (see table below) - **before** the
-   split.
-
-### Securing the runner's access to target systems
-
-- Prefer SSH keys set up as **deploy keys with a `command=` restriction** in
-  `authorized_keys`, e.g.:
-
-  ```
-  command="/opt/workshop/bin/remote-deploy.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... deploy@runner
-  ```
-
-  `remote-deploy.sh` inspects `$SSH_ORIGINAL_COMMAND` and only allows a
-  fixed allowlist of commands (pull/run the image) instead of free shell
-  access.
-- Use **GitHub Environments** with protection rules per cluster
-  (`cluster-a`, `cluster-b`, `luis`) instead of one repo-wide secret - each
-  environment gets its own `CLUSTER_SSH_KEY`/credentials.
-- A runner with Docker socket access is effectively root: use **rootless
-  Docker** where possible, and don't share the runner with other workloads.
-- Keep the GHCR package **private**, use a pull token with as narrow a
-  scope as possible (`read:packages` instead of a full PAT), and inject the
-  token only via the relevant environment (`GHCR_PULL_TOKEN`).
-
-## Shared interfaces (fixed before the split)
-
-| What                   | Format/convention                                                                              |
-| ---------------------- | ---------------------------------------------------------------------------------------------- |
-| Image naming           | `ghcr.io/org/project:<git-sha>`                                                              |
-| Cluster identifiers    | as in`config/clusters.json`: `cluster-a`, `cluster-b`, `luis`                          |
-| `deploy.sh` call     | `./deploy.sh <cluster-name> <image-tag>` → exit code 0/≠0                                  |
-| `verify.sh` call     | reads`config/clusters.json`, returns a status table + exit code                              |
-| Deployment info format | JSON with at least`commit`, `image_tag`, `timestamp` (see `create-deployment-info.sh`) |
-
-### `deploy.sh` exit codes
-
-| Code | Meaning                   |
-| ---- | ------------------------- |
-| 0    | success                   |
-| 1    | local usage/config error  |
-| 2    | unknown cluster name/type |
-| 3    | cluster not reachable     |
-| 4    | remote command failed     |
-
-### Digest vs. tag
-
-`verify.sh` compares **tags** by default (simple, but tags are mutable in
-principle). For a solid guarantee that "the same code is really running
-everywhere", also compare the **digest**:
-
-```
-# read the digest of the pushed image
-docker buildx imagetools inspect ghcr.io/org/project:<sha>
-
-# reference a locally built image by digest
-docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/org/project:<sha>
+```json
+{
+  "cluster-a": { "host": "localhost", "port": 2222, "user": "clustera", "key": "~/workshop-keys/runner_key", "type": "docker" }
+}
 ```
 
-`create-deployment-info.sh` optionally accepts `IMAGE_DIGEST` to record the
-digest in the deployment info JSON.
+`type` is `docker` (Cluster A/B, deployed via `docker pull && docker run`)
+or `apptainer` (LUIS, deployed as `apptainer pull` into
+`project_<tag>.sif` + `apptainer run`). `deploy.sh`/`verify.sh` both read
+this file - keep cluster names, `key` and `type` in sync with whatever
+`cluster-config/*.sh` actually starts.
 
-## Group breakdown
+Build the two local simulators with:
+```
+./cluster-config/cluster-a-docker.sh ~/workshop-keys/runner_key.pub
+./cluster-config/cluster-b-docker.sh ~/workshop-keys/runner_key.pub
+```
 
-### Group 1: GitHub Actions & Multi-Cluster Selection
+## Work packages & Definition of Done
 
-Owns: `workflow_dispatch`, cluster selection (checkboxes), job conditions,
-end-of-run summary. See `.github/workflows/deploy.yml`.
+| WP | Owns | Scope |
+|---|---|---|
+| WP0 | everyone | individual setup (see above) - prerequisite, no group scope |
+| WP1 | `.github/workflows/deploy.yml` | `workflow_dispatch` with per-cluster checkboxes + build toggle, independent `if:` jobs, merges WP2-WP4 into one workflow |
+| WP2 | `Dockerfile` | image build, Git-SHA + digest tagging, GHCR push, Docker-vs-Apptainer write-up |
+| WP3 | `scripts/deploy.sh` | SSH-based deploy to Cluster A/B, optional `scripts/sync.sh` |
+| WP4 | `scripts/verify.sh` | compares Git commit vs. what's actually running per cluster |
+| WP5 | LUIS/Apptainer | same deploy logic as WP3 but Apptainer + `sbatch`, tested on each member's own LUIS account |
+| WP6 (stretch) | PyExperimenter | replaces `hello.py` with a real parameterized workload, per-cluster SQLite (no shared DB - see below) |
 
-**Definition of Done**
+**WP1 DoD:** checkboxes for Cluster A/B + build toggle defined (LUIS is
+deliberately not in this workflow); each cluster has its own `if:` job;
+jobs call `deploy.sh`/`verify.sh` with agreed parameters; a failure in one
+cluster job doesn't block the other; runs end-to-end at least once on your
+own runner; summary shows per-cluster success/failure; no secrets in
+plaintext.
 
-- [ ] `workflow_dispatch` with inputs for cluster selection (Cluster A/B, LUIS) is defined
-- [ ] The "Build container" input (yes/no) works independently of cluster selection
-- [ ] Each cluster has its own job with an `if:` condition that only runs when selected
-- [ ] Jobs call the other groups' scripts with the agreed-upon parameters
-- [ ] The workflow runs end-to-end at least once (even with placeholders from other groups)
-- [ ] A failure in one cluster job doesn't block the other cluster jobs
-- [ ] The end-of-run summary shows success/failure per cluster
-- [ ] No secrets in plaintext in the workflow file; environments/secrets referenced correctly
+**WP2 DoD:** `docker build` succeeds locally; image tagged with Git SHA
+(not just `latest`); push to `ghcr.io/<you>/project:<sha>` works from the
+Action; digest readable via `docker inspect --format='{{index .RepoDigests 0}}'`
+and documented; container runs locally with visible output; short
+Docker-vs-Apptainer write-up (daemon/root, image format, execution
+model/SLURM); classic-PAT pitfall documented.
 
-### Group 2: Containers & Reproducible Environments
+**WP3 DoD:** dedicated SSH key used (not your personal one);
+`deploy.sh cluster-a <tag>` and `deploy.sh cluster-b <tag>` succeed against
+the local simulators; exit code unambiguous (0/success, ≠0/failure);
+restricted SSH access discussed (`command=` restriction, even if not
+implemented in the simulator); Docker-socket GID mismatch pitfall
+documented (see `cluster-config/local-docker.sh` for one fix); unreachable
+cluster / missing image produce a clear error instead of a crash.
 
-Owns: `Dockerfile`, image tags, GHCR push, starting the container, Docker
-vs. Apptainer differences.
+**WP4 DoD:** `verify.sh` with no argument uses `git rev-parse --short HEAD`
+as the comparison value; `verify.sh <tag>` compares against an explicit
+tag; three states distinguished (✓ up to date / OUTDATED / UNREACHABLE -
+unreachable ≠ outdated); works when only some clusters are deployed;
+exit code reflects overall status; tested against Cluster A including a
+deliberately triggered OUTDATED case.
 
-**Definition of Done**
+**WP5 DoD:** `deploy.sh luis <tag>` pulls and converts to `.sif` on the
+login node; `sync.sh luis` transfers code to `/bigwork/<you>/...`; the
+push-triggered `sync_luis.yml` syncs on every commit, tested by at least
+two group members on their own accounts; an `sbatch` template runs the
+container as a real (non-login-node) job; login-node-vs-compute-node is
+documented; setup steps are clear enough for someone outside the group to
+follow on their own account; at least two members verified the full flow
+end-to-end individually.
 
-- [ ] `Dockerfile` builds cleanly locally (`docker build .`)
-- [ ] Image is tagged with the git SHA (`ghcr.io/org/project:<sha>`), not just `latest`
-- [ ] Push to GHCR works from the Action
-- [ ] Image can be referenced by digest, and reading it out is documented
-- [ ] Container can be started locally, `hello.py` visibly runs through
-- [ ] Short write-up: Docker vs. Apptainer (at least 3 points: daemon/root, image format, network/namespaces)
-- [ ] Example command for GHCR → `.sif` (`apptainer pull docker://...`) documented
-- [ ] GHCR package visibility/permissions clarified (private + which tokens may pull)
+**WP6 DoD (optional):** minimal PyExperimenter setup runs inside the
+container on at least one cluster; results go to a local SQLite file per
+cluster, **not** a shared MySQL instance (a shared DB reachable from
+Cluster A, B *and* LUIS reintroduces the exact firewall/network dependency
+that caused delays with LUIS); a small script pulls results back per
+cluster (reuse the `sync.sh` pattern); documented why a shared DB was
+avoided.
 
-### Group 3: Transport & Remote Execution
+## Known pitfalls
 
-Owns: `scripts/deploy.sh`, SSH, optionally `scripts/sync.sh`.
+| Problem | Fix |
+|---|---|
+| `permission_denied: create_package` on GHCR push | Wrong namespace - set `REGISTRY`/fork owner to your own username |
+| GHCR login fails with a fine-grained token | Use a classic PAT with `write:packages` + `repo` |
+| `docker: permission denied ... docker.sock` in the simulator | GID mismatch between host socket and container group - `cluster-config/local-docker.sh` fixes this at container start |
+| YAML workflow: `No event triggers defined in on` | Usually a copy-paste formatting issue - rewrite with `cat > file << 'EOF' ... EOF` |
+| SSH key auth doesn't work | Check permissions: `chmod 700 ~/.ssh`, `chmod 600 ~/.ssh/authorized_keys` |
+| `usermod` not found on macOS | Docker Desktop handles the docker group itself, no setup needed |
+| LUIS login node kills processes | Only run short tests there; real workloads go through `sbatch`/SLURM |
 
-**Definition of Done**
+## Suggested timeline (3.5h)
 
-- [ ] SSH connection to Cluster A and LUIS successfully tested (key-based)
-- [ ] `deploy.sh` with a clearly documented signature: `./deploy.sh <cluster-name> <image-tag>`
-- [ ] Script correctly distinguishes Docker (Cluster A/B) vs. Apptainer (LUIS) internally
-- [ ] Pull + run on the target system demonstrably works
-- [ ] Exit code is unambiguous (0 = success, ≠0 = failure)
-- [ ] SSH access is restricted (`command=` restriction, no full shell access)
-- [ ] Optional: `rsync` for source sync works and is cleanly separated from the Docker deploy logic
-- [ ] Failure cases handled: cluster unreachable, image not found
-
-### Group 4: Version Tracking & Verification
-
-Owns: `scripts/create-deployment-info.sh`, `scripts/verify.sh`.
-
-**Definition of Done**
-
-- [ ] `create-deployment-info.sh` produces JSON with git commit, image tag/digest, timestamp
-- [ ] `verify.sh` reads the actually running image tag for each cluster
-- [ ] Expected (current git commit) vs. actual (per cluster) comparison is correct and readable
-- [ ] Status output is unambiguous: ✓ up to date / OUTDATED / "unreachable" as a third state
-- [ ] Script works even when only some clusters have been deployed
-- [ ] Exit code reflects the overall status
-- [ ] Short write-up: how "same code, same environment" is actually verified (tag vs. digest comparison)
-
-## Integration
-
-After group work: a shared phase where all four parts are integrated
-against the real workflow (`deploy.yml`) - each group replaces its
-placeholder with its own implementation, followed by an end-to-end run
-across all clusters.
-
-## Timeline
-
-_TODO: add a timeline for the workshop day (preparation, group work,
-integration, wrap-up)._
+| Time | Activity |
+|---|---|
+| 0:00-0:15 | Kick-off, confirm WP0 done, assign WP1-WP5 |
+| 0:15-1:15 | Group work using local Cluster A/B simulators (WP1-WP4) or own LUIS account (WP5) |
+| 1:15-1:30 | Break + sync (interface mismatches between `deploy.sh`/`verify.sh` params) |
+| 1:30-2:30 | Integration: wire WP1-WP4 together, test end-to-end against Cluster A |
+| 2:30-3:00 | Harden: add Cluster B, integrate WP5, error handling |
+| 3:00-3:30 | Demo + retrospective |

@@ -3,14 +3,13 @@
 # every cluster in config/clusters.json reachable via SSH.
 #
 # Exit code: 0 = all checks passed, 1 = at least one check failed.
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLUSTERS_FILE="$REPO_ROOT/config/clusters.json"
 
 STATUS=0
-SSH_KEY="${SSH_KEY:-}"
 
 check() {
   local desc="$1"
@@ -32,12 +31,16 @@ check "git installed" command -v git
 echo
 echo "== Cluster reachability (config/clusters.json) =="
 if [[ -f "$CLUSTERS_FILE" ]]; then
-  while IFS=$'\t' read -r NAME HOST PORT USER_NAME; do
-    SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -p "$PORT")
-    [[ -n "$SSH_KEY" ]] && SSH_ARGS+=(-i "$SSH_KEY")
-    check "$NAME reachable (${USER_NAME}@${HOST}:${PORT})" \
-      ssh "${SSH_ARGS[@]}" "${USER_NAME}@${HOST}" true
-  done < <(jq -r '.clusters[] | [.name, .host, (.port // 22), .user] | @tsv' "$CLUSTERS_FILE")
+  for CLUSTER_NAME in $(jq -r 'keys[]' "$CLUSTERS_FILE"); do
+    HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CLUSTERS_FILE")
+    PORT=$(jq -r ".\"$CLUSTER_NAME\".port // 22" "$CLUSTERS_FILE")
+    USER_NAME=$(jq -r ".\"$CLUSTER_NAME\".user" "$CLUSTERS_FILE")
+    KEY=$(jq -r ".\"$CLUSTER_NAME\".key" "$CLUSTERS_FILE" | sed "s|~|$HOME|")
+
+    check "$CLUSTER_NAME reachable (${USER_NAME}@${HOST}:${PORT})" \
+      ssh -p "$PORT" -i "$KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+          -o StrictHostKeyChecking=accept-new "${USER_NAME}@${HOST}" true
+  done
 else
   echo "FAIL - cluster config not found: $CLUSTERS_FILE"
   STATUS=1

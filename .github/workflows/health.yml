@@ -2,29 +2,14 @@ name: Health
 
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "0 7 * * *"
 
 jobs:
   verify:
     name: Verify clusters
-    runs-on: ubuntu-latest
-    environment: monitoring
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.CLUSTER_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-
       - name: Preflight
-        env:
-          SSH_KEY: ~/.ssh/deploy_key
         run: ./scripts/preflight.sh
-
       - name: Verify deployments
-        env:
-          SSH_KEY: ~/.ssh/deploy_key
         run: ./scripts/verify.sh

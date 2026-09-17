@@ -4,7 +4,7 @@ set -euo pipefail
 CLUSTER_NAME="${1:-}"
 IMAGE_TAG="${2:-}"
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
-REGISTRY="ghcr.io/evavormschlag/project"
+REGISTRY="ghcr.io/<org>/project"
 
 if [[ -z "$CLUSTER_NAME" || -z "$IMAGE_TAG" ]]; then
   echo "Usage: ./deploy.sh <cluster-name> <image-tag>"
@@ -12,12 +12,12 @@ if [[ -z "$CLUSTER_NAME" || -z "$IMAGE_TAG" ]]; then
 fi
 
 if ! command -v jq &> /dev/null; then
-  echo "Fehler: jq ist nicht installiert (brew install jq)"
+  echo "ERROR: jq is not installed (brew install jq)"
   exit 1
 fi
 
 if ! jq -e ".\"$CLUSTER_NAME\"" "$CONFIG_FILE" &> /dev/null; then
-  echo "Fehler: Cluster '$CLUSTER_NAME' nicht in $CONFIG_FILE gefunden"
+  echo "ERROR: cluster '$CLUSTER_NAME' not found in $CONFIG_FILE"
   exit 1
 fi
 
@@ -34,15 +34,15 @@ if [[ "$TYPE" == "docker" ]]; then
 elif [[ "$TYPE" == "apptainer" ]]; then
   REMOTE_CMD="apptainer pull --force project_${IMAGE_TAG}.sif docker://${REGISTRY}:${IMAGE_TAG} && apptainer run project_${IMAGE_TAG}.sif"
 else
-  echo "Fehler: Unbekannter Typ '$TYPE' für Cluster '$CLUSTER_NAME'"
+  echo "ERROR: unknown type '$TYPE' for cluster '$CLUSTER_NAME'"
   exit 1
 fi
 
 if ssh -p "$PORT" -i "$KEY" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
    "${USER}@${HOST}" "$REMOTE_CMD"; then
-  echo "✓ Deployment auf $CLUSTER_NAME erfolgreich"
+  echo "✓ Deployment to $CLUSTER_NAME succeeded"
   exit 0
 else
-  echo "✗ Deployment auf $CLUSTER_NAME fehlgeschlagen"
+  echo "✗ Deployment to $CLUSTER_NAME failed"
   exit 1
 fi

@@ -5,7 +5,7 @@ CLUSTER_NAME="${1:-luis}"
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
 
 if ! command -v jq &> /dev/null; then
-  echo "Fehler: jq ist nicht installiert"
+  echo "ERROR: jq is not installed"
   exit 1
 fi
 
@@ -14,7 +14,7 @@ USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
 KEY=$(jq -r ".\"$CLUSTER_NAME\".key" "$CONFIG_FILE" | sed "s|~|$HOME|")
 REMOTE_PATH=$(jq -r ".\"$CLUSTER_NAME\".sync_path" "$CONFIG_FILE")
 
-echo "Syncing Code zu $CLUSTER_NAME ($USER@$HOST:$REMOTE_PATH) ..."
+echo "Syncing code to $CLUSTER_NAME ($USER@$HOST:$REMOTE_PATH) ..."
 
 rsync -avz --delete \
   -e "ssh -i $KEY -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
@@ -23,4 +23,4 @@ rsync -avz --delete \
   "$(dirname "$0")/../" \
   "${USER}@${HOST}:${REMOTE_PATH}/"
 
-echo "✓ Sync zu $CLUSTER_NAME abgeschlossen"
+echo "✓ Sync to $CLUSTER_NAME complete"

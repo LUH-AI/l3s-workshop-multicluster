@@ -2,18 +2,21 @@
 # Prepares/tests the LUIS target. Unlike Cluster A/B, LUIS isn't simulated
 # via a local Docker container here: Apptainer needs real Linux user
 # namespaces that don't nest well inside Docker. Run this directly on a
-# machine that has Apptainer installed (e.g. a LUIS login node) to test the
-# pull+run steps deploy.sh will later perform remotely over SSH.
+# LUIS login node to test the pull+run steps deploy.sh performs remotely
+# over SSH (see WP5).
 #
-# Usage: ./luis-apptainer.sh <image-tag> [sif-path]
+# Uses the same REGISTRY convention as scripts/deploy.sh/verify.sh - update
+# <org> below to your own GitHub username - and the same project_<tag>.sif
+# naming, so verify.sh can find what this script deployed.
+#
+# Usage: ./luis-apptainer.sh <image-tag>
 set -euo pipefail
 
-GHCR_ORG="${GHCR_ORG:-org}"
-GHCR_PROJECT="${GHCR_PROJECT:-project}"
+REGISTRY="ghcr.io/<org>/project"
 
 IMAGE_TAG="${1:?image tag required, e.g. dummy or a git sha}"
-SIF_PATH="${2:-$HOME/multicluster-workshop.sif}"
-IMAGE="ghcr.io/${GHCR_ORG}/${GHCR_PROJECT}:${IMAGE_TAG}"
+SIF_PATH="$HOME/project_${IMAGE_TAG}.sif"
+IMAGE="${REGISTRY}:${IMAGE_TAG}"
 
 command -v apptainer >/dev/null 2>&1 || { echo "ERROR: apptainer not found in PATH" >&2; exit 1; }
 

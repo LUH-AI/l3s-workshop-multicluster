@@ -2,17 +2,17 @@
 set -uo pipefail
 
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
-REGISTRY="ghcr.io/evavormschlag/project"
+REGISTRY="ghcr.io/<org>/project"
 EXPECTED_TAG="${1:-$(git rev-parse --short HEAD)}"
 
 if ! command -v jq &> /dev/null; then
-  echo "Fehler: jq ist nicht installiert (brew install jq)"
+  echo "ERROR: jq is not installed (brew install jq)"
   exit 1
 fi
 
-echo "Erwarteter Tag (aktueller Git-Commit): $EXPECTED_TAG"
+echo "Expected tag (current git commit): $EXPECTED_TAG"
 echo ""
-printf "%-12s %-15s %s\n" "CLUSTER" "LAUFENDER TAG" "STATUS"
+printf "%-12s %-15s %s\n" "CLUSTER" "RUNNING TAG" "STATUS"
 printf "%-12s %-15s %s\n" "-------" "-------------" "------"
 
 OVERALL_STATUS=0
@@ -55,9 +55,9 @@ done
 
 echo ""
 if [[ $OVERALL_STATUS -eq 0 ]]; then
-  echo "Alle Cluster auf dem aktuellen Stand."
+  echo "All clusters up to date."
 else
-  echo "Mindestens ein Cluster ist nicht aktuell oder nicht erreichbar."
+  echo "At least one cluster is outdated or unreachable."
 fi
 
 exit $OVERALL_STATUS
