@@ -13,8 +13,8 @@ Cluster Configs   ----->   PyExperimenter    ----->    AI Scheduling
        |                          |                            |
 config/clusters.json     central DB (WP1) +          historical runs from
 + deploy/sync/verify      per-cluster workers          the central DB
-                                                        -> LightGBM predictor
-                                                        -> Allocator (greedy/ILP)
+                                                        -> Runtime Predictor
+                                                        -> Allocator
                                                         -> generated sbatch configs
 ```
 
@@ -141,11 +141,15 @@ first-come-first-served. Two stages:
 - Input: an open experiment's parameters (+ whatever metadata is
   available before it runs).
 - Output: predicted runtime / resource need.
-- Model: LightGBM regression, trained on historical PyExperimenter
-  results from Component 2's central DB - so this component has a hard
-  data dependency on Component 2 actually having produced enough
-  completed runs to train on. Cold-start (no history yet) needs a
-  fallback (e.g. a fixed estimate, or FCFS until enough data exists).
+- Trained on historical PyExperimenter results from Component 2's central
+  DB - so this component has a hard data dependency on Component 2
+  actually having produced enough completed runs to train on. Cold-start
+  (no history yet) needs a fallback (e.g. a fixed estimate, or FCFS until
+  enough data exists).
+- **Deliberately open:** which model, which features, how it's
+  trained/retrained - none of that is decided yet. That's part of the
+  work, best informed by what the actual historical data looks like once
+  it exists, not fixed upfront.
 
 **2. Allocator**
 
@@ -155,12 +159,10 @@ first-come-first-served. Two stages:
 - Output: an experiment -> cluster assignment, from which `sbatch`
   configs are generated automatically (reusing the `sbatch` template
   pattern already established for LUIS-style deploys).
-- MVP: a greedy heuristic (e.g. assign the longest/most demanding
-  predicted job to the currently-least-loaded cluster first).
-- Optimized variant: formulate as an ILP (decision variables = experiment
-  -> cluster assignment, objective = minimize makespan or maximize
-  utilization, constraints = per-cluster capacity) and compare against
-  the greedy MVP.
+- **Deliberately open:** how the assignment gets computed - the right
+  approach depends on tradeoffs (solution quality vs. the allocator's own
+  runtime cost, see Evaluation) that aren't clear yet, so it isn't fixed
+  upfront either.
 
 ### Evaluation
 
@@ -170,21 +172,23 @@ clever" default) on:
 - **Makespan** - total wall-clock time to finish a batch of experiments
 - **Cluster utilization** - % of available capacity actually used over
   the run
-- **Allocator runtime** - the scheduler's own computational cost; an ILP
-  that takes longer to solve than the time it saves is a real failure
-  mode, not just a nice-to-know number
+- **Allocator runtime** - the scheduler's own computational cost; an
+  allocator that takes longer to compute than the time it saves is a real
+  failure mode, not just a nice-to-know number
 
 ### Definition of Done
 
 - Runtime predictor trained on real historical data from Component 2,
   with a documented error metric (e.g. MAE/RMSE on a held-out split) and
   a defined cold-start fallback
-- Greedy allocator produces valid, capacity-respecting assignments and
-  generated `sbatch` scripts that actually run
-- ILP variant implemented and benchmarked against the greedy one on
-  allocator runtime specifically, not just solution quality
-- Evaluation script/notebook reproducibly compares FCFS vs. greedy vs. ILP
-  on all three metrics above, on either real or synthetic experiment data
+- Allocator produces valid, capacity-respecting assignments and generated
+  `sbatch` scripts that actually run
+- If more than one allocation approach is tried, they're benchmarked
+  against each other on allocator runtime specifically, not just solution
+  quality
+- Evaluation script/notebook reproducibly compares the allocator(s)
+  against the FCFS baseline on all three metrics above, on either real or
+  synthetic experiment data
 
 ---
 
@@ -201,9 +205,9 @@ is agreed on early:
 | **1b - Ansible/Fabric setup vs. current scripts** | 1a's entries exist                                                  | immediately, in parallel with 1a                                                   | decide once, don't build both paths long-term                                                                           |
 | **2a - PyExperimenter worker in the container**   | Component 1 has*one* working cluster                              | as soon as one target deploys reliably                                             | doesn't need all 5 clusters, just 1-2 to develop against                                                                |
 | **2b - Central DB reachability validation**       | none - can run standalone                                           | immediately                                                                        | do this**first**, in parallel with everything else - it's the biggest risk in the whole WP, see the callout above |
-| **3a - Runtime predictor**                        | Component 2 producing real historical rows                          | once there's enough training data (dozens-hundreds of completed runs, not day one) | until then, build/test the pipeline against synthetic historical data so the code is ready when real data exists        |
-| **3b - Greedy allocator + sbatch generation**     | 3a's prediction interface (can be a stub returning fixed estimates) | as soon as 3a's function signature is agreed, before it's actually trained         | integrate with the real predictor last                                                                                  |
-| **3c - ILP variant + evaluation**                 | 3b working end-to-end                                               | once greedy is validated                                                           | stretch goal - only meaningful once there's a working baseline to compare against                                       |
+| **3a - Runtime predictor**                        | Component 2 producing real historical rows                          | once there's enough training data (dozens-hundreds of completed runs, not day one) | until then, build/test the pipeline against synthetic historical data so the code is ready when real data exists; model/feature choice is open, see Component 3 |
+| **3b - Allocator (first working version) + sbatch generation** | 3a's prediction interface (can be a stub returning fixed estimates) | as soon as 3a's function signature is agreed, before it's actually trained         | integrate with the real predictor last; approach is open, see Component 3                                               |
+| **3c - Second allocation approach + evaluation**  | 3b working end-to-end                                               | once 3b is validated                                                               | only worth doing once there's a working baseline to compare against - whether a second approach is even needed is itself open |
 
 If the WP3 group is small, a reasonable 3-way split is one person per
 component (1, 2, 3), with component 3's person starting on **3b against a

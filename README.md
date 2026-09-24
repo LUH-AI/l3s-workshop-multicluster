@@ -18,7 +18,8 @@ full under `doc/`:
 - **[WP3 - Cluster Integration & Resource Optimization](doc/wp3.md)** -
   the remaining/ongoing work: wiring up the rest of the real clusters,
   running real experiments via PyExperimenter, and an AI-assisted
-  scheduler (LightGBM + ILP) that decides where they run.
+  scheduler (runtime predictor + allocator, method open) that decides
+  where they run.
 
 See also `doc/clusters.md` (per-cluster connection details for
 LUIS/KISSKI/PC2) and `doc/ansible-hpc-automation.md` (the Ansible/Fabric
