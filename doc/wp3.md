@@ -84,24 +84,32 @@ experiment grid gets worked off by one or more parallel workers.
 - **Results -> central DB (WP1):** finished rows write back to a shared
   database that WP1's side is expected to expose.
 
-### Central DB reachability - resolved by WP1's reverse-tunnel design
+### Central DB reachability - proposed approach, not yet validated
 
 The original workshop design (see `README.md` WP6) deliberately used
 per-cluster SQLite instead of a shared DB, specifically to avoid requiring
 every cluster to reach one network endpoint - the exact kind of firewall
-dependency that caused delays with LUIS before. `doc/wp1_proposed_solution.md`
-§7 now resolves this properly: instead of exposing the DB *to* the
-clusters, the runner opens an **SSH reverse tunnel** (`ssh -R`) into each
-cluster over connectivity that already has to exist for deployment, so a
-worker on the cluster reaches the DB via `localhost:<forwarded-port>`
-with no new inbound/outbound firewall rule needed anywhere.
+dependency that caused delays with LUIS before. The settled part of the
+new design is simple: one DB, running locally on the runner's own
+hardware. `doc/wp1_proposed_solution.md` §7 proposes reaching it from each
+cluster via an **SSH reverse tunnel** (`ssh -R`) over connectivity that
+already exists for deployment - but that mechanism is explicitly
+**untested**, not a resolved dependency. Test it against the Cluster A
+simulator (WP1 §8) before Component 2 relies on it for real, then again
+against an actual HPC login/compute node before assuming it generalizes.
 
-Two things from that design Component 2 needs to actually rely on when
-implementing the worker's DB connection:
+If the tunnel approach doesn't hold up on a real HPC target (see WP1 §7
+for why that's plausible - SSH reverse tunnels and SLURM's node allocation
+don't necessarily cooperate), don't silently work around it inside
+Component 2 - it's a WP1-level fallback decision (e.g. login-node-side
+sync instead of a live tunnel), not something to patch over per-worker.
 
-- The tunnel must be **up before a worker tries to write**, and for the
-  whole duration a `sbatch` job might run - not just during `deploy.sh`'s
-  brief SSH call (see WP1 §7's persistent-tunnel note).
+Two more things Component 2 needs once *some* connection path is
+validated:
+
+- The connection must be **up before a worker tries to write**, and for
+  the whole duration a `sbatch` job might run - not just during
+  `deploy.sh`'s brief SSH call (see WP1 §7's tunnel-lifetime note).
 - Enable SQLite **WAL journal mode** on the DB before running concurrent
   workers - see WP1 §7. PyExperimenter's row-locking prevents two workers
   claiming the same experiment; it doesn't by itself prevent SQLite

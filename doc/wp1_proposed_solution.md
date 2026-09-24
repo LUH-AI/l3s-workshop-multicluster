@@ -6,6 +6,38 @@ framework (that comparison is WP2). This describes the target design;
 where the current implementation doesn't yet match it, that's called out
 explicitly rather than glossed over.
 
+## 0. Prerequisites
+
+Nothing below works until these are actually in place - not just
+installed, but running:
+
+- **Docker installed** on the runner hardware. Needed both for the
+  workflow's own `docker build`/`docker push` steps (§2) and, for the
+  Cluster A simulator specifically, via the host socket it bind-mounts in
+  (§8) - so this is the same Docker install serving both roles, not two
+  separate ones.
+- **A dedicated SSH key pair created**, not a personal key:
+  ```bash
+  ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""
+  ```
+  Its private half becomes the `SSH_PRIVATE_KEY` GitHub secret (§5); its
+  public half has to be installed on every target this pipeline deploys
+  to - the Cluster A simulator (`cluster-config/cluster-a-docker.sh`
+  takes it as an argument) and every real cluster's `authorized_keys`.
+- **The self-hosted runner registered *and* running**, not just
+  installed - registered against the repo under Settings -> Actions ->
+  Runners, and started as the `systemd` service described in §4. A
+  `workflow_dispatch` run just sits queued with nothing happening if no
+  runner is online to pick it up; this is the single most common reason a
+  run silently does nothing.
+
+Also needed but usually already present on a normal dev machine: `git`,
+`jq` (all of `deploy.sh`/`verify.sh`/`preflight.sh` parse
+`config/clusters.json` with it), and a `GHCR_TOKEN` secret (classic PAT,
+`write:packages` + `repo`) for the push step in §2. The full step-by-step
+for all of the above is the README's WP0 section - this list is "what
+must be true," not "how to get there."
+
 ## 1. Orchestration
 
 GitHub Actions, triggered via `workflow_dispatch`, with manual cluster
@@ -84,36 +116,53 @@ outcomes per cluster (up to date / outdated / unreachable) - see
 
 ## 7. Central data storage
 
-Results from every cluster flow through an **SSH reverse tunnel**
-(`ssh -R`) into a **single SQLite database on the same hardware the
-runner lives on** - no separately hosted database.
+The core idea is simple and is the settled part: **one database, running
+locally on the same hardware as the runner** - not a separately hosted DB
+service, and not per-cluster databases that need aggregating afterwards.
+Every cluster's results end up in that one local DB.
 
-**Mechanism:** the runner already opens outbound SSH connections to every
-cluster for deployment; the natural fit is to reuse that same
-connectivity for the reverse tunnel instead of requiring any new network
-path. Run (from the runner, to each cluster):
+**How results from a remote cluster actually reach it is not yet
+validated** and needs to be tested before anything is built on top of it.
+The current candidate approach:
+
+**SSH reverse tunnel (`ssh -R`), proposed, untested:** the runner already
+opens outbound SSH connections to every cluster for deployment - the idea
+is to reuse that same connectivity for a reverse tunnel instead of
+standing up any new network path:
 
 ```bash
 ssh -R <forwarded-port>:localhost:<sqlite-server-port> <user>@<cluster-host>
 ```
 
-Anything on the cluster side connecting to `localhost:<forwarded-port>`
-then transparently reaches the runner's local DB - no inbound
-connectivity to the runner needed, no outbound internet access needed
-from HPC compute nodes beyond the SSH connection that's already required.
-This is what resolves the risk flagged in `doc/wp3.md` §Component 2 (a
-shared DB reachable from every cluster, including SLURM compute nodes,
-being exactly the kind of firewall dependency that caused delays with
-LUIS before): the tunnel piggybacks on already-permitted SSH traffic
-instead of asking for a new one.
+In theory, anything on the cluster side connecting to
+`localhost:<forwarded-port>` would then transparently reach the runner's
+local DB, with no inbound connectivity to the runner and no outbound
+internet access needed from HPC compute nodes beyond the SSH connection
+already required for deploy - which would sidestep the risk flagged in
+`doc/wp3.md` §Component 2 (a shared DB reachable from every cluster,
+including SLURM compute nodes, being exactly the kind of firewall
+dependency that can cause delays with HPCs).
 
-**Two things to get right operationally, not yet decided:**
+That's the theory, not a demonstrated result. Before Component 2 relies
+on it, it needs an actual test: bring up the tunnel against the Cluster A
+simulator (§8) first (cheap, no HPC access needed), confirm a process on
+the "cluster" side can really write to the runner's DB through it, and
+only then attempt it against a real HPC login node / compute node, where
+SSH reverse tunnels are more likely to hit surprises (allowed at all?
+survives a `sbatch` job's node allocation, which may differ from the
+login node the tunnel was opened from?). If it doesn't hold up, fall back
+options include: workers write results locally and a login-node-side sync
+step forwards them later (same shape as `sync.sh`), or a VPN/known-IP
+allowlist if the cluster's network policy permits one.
+
+**Two more things to get right once the tunnel approach is validated (or
+replaced):**
 
 - **Tunnel lifetime vs. job lifetime.** `sbatch` jobs run asynchronously,
   often well after the runner's deploy-time SSH session has ended. A
   tunnel opened only during `deploy.sh`'s brief SSH call won't still be up
   when the actual job runs later. Given the runner is already a
-  persistent `systemd` service (§4), the tunnels should probably be
+  persistent `systemd` service (§4), the tunnels would probably need to be
   persistent too - one long-lived `autossh`-managed (or systemd-unit-managed)
   reverse tunnel per cluster, independent of any single deploy invocation,
   rather than something `deploy.sh` opens and closes per run.
