@@ -1,10 +1,6 @@
 # WP3: Cluster Integration & Resource Optimization
 
-Three components, each building on the previous one. Component 1 finishes
-wiring the real clusters into the existing deploy pipeline; Component 2
-runs actual experiments on top of that; Component 3 is the core
-contribution - an AI-assisted scheduler that decides *where* those
-experiments should run.
+Three components, each building on the one before it:
 
 ```
 Component 1                Component 2                 Component 3
@@ -18,54 +14,36 @@ config/clusters.json     central DB (WP1) +          historical runs from
                                                         -> generated sbatch configs
 ```
 
+- **Component 1** connects the real clusters (LUIS, KISSKI) to the
+  existing deploy pipeline.
+- **Component 2** runs real experiments on top of that, using
+  PyExperimenter to distribute work across clusters without double
+  execution.
+- **Component 3** is the core contribution: a small AI-assisted
+  scheduler that decides how compute gets allocated across clusters,
+  instead of first-come-first-served.
+
 ## Prerequisites
 
-Before starting WP3 at all - beyond the general WP0/WP1 §0 setup
-(Docker, SSH key, runner running):
+- WP0 done, and WP1's pipeline already working against Cluster A
+  (`deploy.sh`/`verify.sh`/`preflight.sh` succeed there).
+- A KISSKI account (Academic Cloud, public key uploaded at
+  `id.academiccloud.de`, ~10 min propagation wait).
+- Python 3.10 for anything touching SMAC/PyExperimenter - both are
+  already in `requirements.txt`, and the `Dockerfile` is already pinned
+  to `python:3.10-slim` for the same reason.
 
-- **WP1's pipeline already working against Cluster A** -
-  `deploy.sh`/`verify.sh`/`preflight.sh` succeed there (see WP1 §8).
-  Component 1 extends something that already works to more clusters; it
-  doesn't stand on its own.
-- **Accounts + SSH access on the additional real clusters**, beyond LUIS
-  (already covered by WP0/`doc/clusters.md`):
-  - **KISSKI**: an Academic Cloud account, public key uploaded at
-    `id.academiccloud.de`, ~10 min propagation wait
-  - **PC2**: an *approved project* (`hpc-prf-<acronym>`) via
-    PC²-JARDS - this can take real calendar time to get approved, unlike
-    the same-day setup for the other clusters, so start it early
-- **SLURM/`squeue` access on whichever cluster(s) the Allocator
-  (Component 3) will query** - it reads live capacity from `squeue`, so
-  this needs to work on at least one real SLURM cluster before the
-  allocator can be tested against anything but static `clusters.json`
-  config
-- **Python 3.10** for anything using SMAC/PyExperimenter (both already in
-  `requirements.txt`) - SMAC's own pinned dependencies are most reliably
-  compatible with 3.10; newer versions risk dependency resolution
-  failures. The `Dockerfile` is already pinned to `python:3.10-slim`
-  accordingly - keep any local dev environment for Component 2/3 on 3.10
-  too, rather than whatever's newest on your machine.
+**What's realistic in 3-4h:** most of this only needs the local
+Cluster A simulator, not real HPC access.
 
-### How much of this needs real HPC access to test?
-
-Less than it looks like. Most of WP3 can be developed and tested against
-**only the Cluster A simulator**, no LUIS/KISSKI/PC2 account required:
-
-- **Component 1** is the exception - its actual point is wiring up the
-  real clusters, so genuinely validating it needs those accounts. The
-  config mechanics (entries following the `doc/clusters.md` templates,
-  the existing `docker`/`apptainer` branching in `deploy.sh`) can be
-  prepared without them, just not confirmed working.
-- **Component 2**'s worker loop and row-locking can be fully exercised
-  with multiple local processes against Cluster A - including the SSH
-  reverse tunnel from WP1 §7, which is explicitly supposed to be tried
-  there first anyway (§ above). Only SLURM-specific failure modes (e.g. a
-  stale lock left behind by an `sbatch` timeout) need a real HPC target.
-- **Component 3**: the runtime predictor can be built/tested against
-  synthetic historical data (see "Splitting into parallel sub-tasks"
-  below); the allocator's assignment logic can be tested against mocked
-  capacity numbers. Only the live `squeue` read needs a real SLURM
-  cluster - everything upstream of that call doesn't.
+- Component 1: wire up KISSKI if the account is ready; Cluster A and
+  LUIS are already wired.
+- Component 2: the worker loop and row-locking can be fully tested
+  against Cluster A alone.
+- Component 3: run on **synthetic data** from the start - a real,
+  trained predictor needs way more historical runs than a few hours can
+  produce. A working pipeline you could later point at real data is the
+  actual goal here, not a finished model.
 
 ---
 
@@ -73,42 +51,27 @@ Less than it looks like. Most of WP3 can be developed and tested against
 
 ### Scope
 
-Get every target cluster - Cluster A (Docker simulator), LUIS
-(Apptainer, already wired), and the two clusters currently listed as "not
-yet in `config/clusters.json`" in `doc/clusters.md` (KISSKI, PC2) - into
-a state where `deploy.sh`/`verify.sh`/`sync.sh` (or the Ansible/Fabric
-alternative from `doc/ansible-hpc-automation.md`) work against all of
-them without code changes, only config.
+Get `deploy.sh`/`verify.sh`/`sync.sh` (or the Ansible playbook in
+`doc/ansible-hpc-automation.md`) working against every target cluster,
+using only config changes - the `docker`/`apptainer` branching already
+exists in `scripts/deploy.sh`, and `doc/clusters.md` has ready-to-use
+`clusters.json` templates.
 
-This is largely integration work, not new engineering: the `type: docker`
-/ `type: apptainer` branching already exists in `scripts/deploy.sh`, and
-`doc/clusters.md` already has ready-to-use `clusters.json` templates for
-KISSKI and PC2. What's still open:
-
-- Add the KISSKI and PC2 entries to `config/clusters.json` for real (the
-  templates use `<your-username>`/`<acronym>` placeholders - someone needs
-  to actually get accounts, test connectivity, and commit working
-  entries or a documented per-participant substitution step).
-- Decide, now that there are 3+ real HPC targets instead of 1, whether
-  one-time environment setup goes through `deploy.sh`'s ad-hoc SSH calls
-  or through the Ansible playbook in `doc/ansible-hpc-automation.md`
-  (`setup_hpc.yml` already runs against `luis,kisski,pc2` in one command -
-  that doc's own guidance is to prefer Ansible once you're managing more
-  than two or three clusters regularly, which is now the case).
-- Confirm `scripts/preflight.sh` covers all configured clusters (it reads
-  `config/clusters.json` generically, so this should be "just add the
-  entries," but verify it doesn't silently skip anything).
+- Add a working KISSKI entry to `config/clusters.json`.
+- Make sure `scripts/preflight.sh` picks it up.
+- Add an `sbatch` job template so real workloads run as an actual SLURM
+  job, not on the login node (`cluster-config/luis-apptainer.sh` only
+  covers a login-node smoke test).
 
 ### Definition of Done
 
-- `config/clusters.json` has working entries for Cluster A, LUIS, KISSKI,
-  and PC2 (or a documented reason one is deferred)
-- `scripts/preflight.sh` reports all four as reachable
-- A smoke deploy (`deploy.sh <cluster> dummy`, or the Ansible
-  `setup_hpc.yml` equivalent) succeeds on each real cluster at least once
-- Storage-path and login-node-vs-compute-node quirks per cluster are
-  captured in `doc/clusters.md` (mostly already done for LUIS/KISSKI/PC2 -
-  keep it in sync as entries move from "template" to "working")
+- `config/clusters.json` has working entries for Cluster A, LUIS, and
+  KISSKI
+- `scripts/preflight.sh` reports all of them as reachable
+- A smoke deploy (`deploy.sh <cluster> dummy`) succeeds on each real
+  cluster at least once
+- An `sbatch` job template runs the container as a real (non-login-node)
+  job on at least one SLURM cluster
 
 ---
 
@@ -116,64 +79,49 @@ KISSKI and PC2. What's still open:
 
 ### Scope
 
-The execution layer that runs *after* Component 1's deploy step: inside
-the deployed container, on each cluster, a PyExperimenter-managed
+Inside the deployed container, on each cluster, a PyExperimenter-managed
 experiment grid gets worked off by one or more parallel workers.
 
-- **Parameter management:** the experiment grid (which parameter
-  combinations exist, which are open/running/done) lives in
-  PyExperimenter's own table structure.
-- **Distribution without double execution:** multiple workers - across
-  clusters, and multiple per cluster - pull the next open row and mark it
-  via PyExperimenter's row-locking, so two workers never grab the same
-  experiment. This is PyExperimenter's built-in mechanism, not something
-  to build from scratch; the work here is wiring the container's
-  entrypoint to actually behave as a PyExperimenter worker loop instead of
-  the current one-shot `hello.py`.
-- **Results -> central DB (WP1):** finished rows write back to a shared
-  database that WP1's side is expected to expose.
+- The experiment grid (which parameter combinations exist, which are
+  open/running/done) lives in PyExperimenter's own table.
+- Multiple workers - across clusters, and multiple per cluster - pull
+  the next open row and claim it via PyExperimenter's built-in
+  row-locking, so two workers never grab the same experiment. The work
+  here is wiring the container's entrypoint to run as a PyExperimenter
+  worker loop instead of the current one-shot `hello.py`.
+- Finished rows write back to a shared database on the runner's own
+  hardware (see `doc/wp1_proposed_solution.md` §7).
 
-### Central DB reachability - proposed approach, not yet validated
+### Getting results back to the central DB
 
-The original workshop design (see `README.md` WP6) deliberately used
-per-cluster SQLite instead of a shared DB, specifically to avoid requiring
-every cluster to reach one network endpoint - the exact kind of firewall
-dependency that caused delays with LUIS before. The settled part of the
-new design is simple: one DB, running locally on the runner's own
-hardware. `doc/wp1_proposed_solution.md` §7 proposes reaching it from each
-cluster via an **SSH reverse tunnel** (`ssh -R`) over connectivity that
-already exists for deployment - but that mechanism is explicitly
-**untested**, not a resolved dependency. Test it against the Cluster A
-simulator (WP1 §8) before Component 2 relies on it for real, then again
-against an actual HPC login/compute node before assuming it generalizes.
+The plan is an SSH reverse tunnel (`ssh -R`) from each cluster back to
+the runner, reusing the SSH connection that deployment already needs
+(details in `doc/wp1_proposed_solution.md` §7). **This hasn't been
+tested yet.** Try it against the Cluster A simulator first - cheap, no
+HPC access needed - before assuming it works on a real cluster.
 
-If the tunnel approach doesn't hold up on a real HPC target (see WP1 §7
-for why that's plausible - SSH reverse tunnels and SLURM's node allocation
-don't necessarily cooperate), don't silently work around it inside
-Component 2 - it's a WP1-level fallback decision (e.g. login-node-side
-sync instead of a live tunnel), not something to patch over per-worker.
+Two things to get right once it's working:
 
-Two more things Component 2 needs once *some* connection path is
-validated:
+- The tunnel needs to stay up for as long as a job might run, not just
+  during `deploy.sh`'s brief SSH call.
+- Turn on SQLite's **WAL journal mode** before running concurrent
+  workers - PyExperimenter's row-locking stops two workers claiming the
+  same experiment, but it doesn't prevent SQLite write-contention on the
+  file itself.
 
-- The connection must be **up before a worker tries to write**, and for
-  the whole duration a `sbatch` job might run - not just during
-  `deploy.sh`'s brief SSH call (see WP1 §7's tunnel-lifetime note).
-- Enable SQLite **WAL journal mode** on the DB before running concurrent
-  workers - see WP1 §7. PyExperimenter's row-locking prevents two workers
-  claiming the same experiment; it doesn't by itself prevent SQLite
-  write-contention on the underlying file.
+If the tunnel doesn't work on a real cluster, that's a WP1-level
+decision to make (e.g. sync results after the fact instead of a live
+tunnel) - don't patch around it inside this component.
 
 ### Definition of Done
 
-- A PyExperimenter worker runs inside the container image and can be
-  started via the same deploy path Component 1 validated
+- A PyExperimenter worker runs inside the container and starts via the
+  same deploy path Component 1 validated
 - At least two workers, on two different clusters, process the same
   experiment grid concurrently with zero duplicate executions
 - Results are verifiably present in the central DB after a run
-- Worker failure (killed mid-experiment, e.g. login node process kill,
-  SLURM timeout) doesn't leave an experiment stuck "running" forever -
-  document or implement how a stale lock gets released
+- A worker killed mid-experiment (login node kill, SLURM timeout)
+  doesn't leave that experiment stuck "running" forever
 
 ---
 
@@ -181,73 +129,59 @@ validated:
 
 ### Scope
 
-Given a set of open experiments and several clusters with different,
-time-varying capacity, decide how compute gets allocated across clusters
-- instead of first-come-first-served. Two pieces, both deliberately open
-on method:
-
 - **Runtime Predictor:** estimates runtime/resource need for open
   experiments, trained on historical results from Component 2's central
-  DB. Needs a cold-start fallback for before enough history exists.
-  Model/features not decided yet.
+  DB. Needs a fallback for before enough history exists. Model and
+  features are open - not decided yet.
 - **Allocator:** given those estimates plus live cluster capacity
   (`config/clusters.json` + `squeue`), decides how much compute to run
-  where and generates the `sbatch` configs to start it. Algorithm not
-  decided yet.
+  where, and generates the `sbatch` configs to start it. Algorithm is
+  open too.
 
-One structural point worth keeping in mind regardless of method: since
-PyExperimenter itself has no concept of clusters (workers just pull
-whatever's next from the central DB), the Allocator naturally works one
-level above it - controlling how many workers run on each cluster -
-rather than assigning individual experiments directly.
+One thing to keep in mind either way: PyExperimenter itself has no
+concept of clusters - workers just pull whatever's next from the central
+DB. So the Allocator naturally works one level above it, by controlling
+how many workers run on each cluster, rather than assigning individual
+experiments.
 
 ### Evaluation
 
-Compare against a **first-come-first-served baseline** (the "do nothing
-clever" default) on:
+Compare against a first-come-first-served baseline on:
 
-- **Makespan** - total wall-clock time to finish a batch of experiments
-- **Cluster utilization** - % of available capacity actually used over
-  the run
-- **Allocator runtime** - the scheduler's own computational cost; an
-  allocator that takes longer to compute than the time it saves is a real
-  failure mode, not just a nice-to-know number
+- **Makespan** - total time to finish a batch of experiments
+- **Cluster utilization** - how much of the available capacity actually
+  gets used
+- **Allocator runtime** - the scheduler's own cost; an allocator slower
+  than the time it saves is a real failure mode
 
 ### Definition of Done
 
-- Runtime predictor trained on real historical data from Component 2,
-  with a documented error metric (e.g. MAE/RMSE on a held-out split) and
-  a defined cold-start fallback
-- Allocator produces valid, capacity-respecting assignments and generated
-  `sbatch` scripts that actually run
-- If more than one allocation approach is tried, they're benchmarked
-  against each other on allocator runtime specifically, not just solution
-  quality
-- Evaluation script/notebook reproducibly compares the allocator(s)
-  against the FCFS baseline on all three metrics above, on either real or
-  synthetic experiment data
+- Runtime predictor trained on real historical data, with a documented
+  error metric (e.g. MAE/RMSE) and a defined fallback for the cold-start
+  case
+- Allocator produces valid, capacity-respecting assignments and
+  generated `sbatch` scripts that actually run
+- Evaluation script/notebook compares the allocator against the FCFS
+  baseline on all three metrics above, on real or synthetic data
 
 ---
 
 ## Splitting into parallel sub-tasks
 
-The three components are already a natural split - the dependency chain
-(1 unblocks 2, 2's data unblocks 3) means later components can *start*
-before earlier ones are fully done, as long as the interface between them
-is agreed on early:
+Later components can start before earlier ones are fully done, as long
+as the interface between them is agreed early:
 
-| Sub-task                                                             | Depends on                                                          | Can start once                                                                     | Notes                                                                                                                                                           |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1a - Wire remaining clusters**                               | nothing                                                             | immediately                                                                        | KISSKI/PC2 entries in`clusters.json`, per `doc/clusters.md` templates                                                                                       |
-| **2a - PyExperimenter worker in the container**                | Component 1 has*one* working cluster                              | as soon as one target deploys reliably                                             | doesn't need all 5 clusters, just 1-2 to develop against                                                                                                        |
-| **2b - Central DB reachability validation**                    | none - can run standalone                                           | immediately                                                                        | do this**first**, in parallel with everything else - it's the biggest risk in the whole WP, see the callout above                                         |
-| **3a - Runtime predictor**                                     | Component 2 producing real historical rows                          | once there's enough training data (dozens-hundreds of completed runs, not day one) | until then, build/test the pipeline against synthetic historical data so the code is ready when real data exists; model/feature choice is open, see Component 3 |
-| **3b - Allocator (first working version) + sbatch generation** | 3a's prediction interface (can be a stub returning fixed estimates) | as soon as 3a's function signature is agreed, before it's actually trained         | integrate with the real predictor last; approach is open, see Component 3                                                                                       |
-| **3c - Second allocation approach + evaluation**               | 3b working end-to-end                                               | once 3b is validated                                                               | only worth doing once there's a working baseline to compare against - whether a second approach is even needed is itself open                                   |
+| Sub-task | Depends on | Can start |
+|---|---|---|
+| **1a - Wire KISSKI** | nothing | immediately |
+| **2a - PyExperimenter worker** | one working cluster | as soon as one target deploys reliably |
+| **2b - DB reachability test** | nothing | immediately - do this first, it's the biggest risk in the WP |
+| **3a - Runtime predictor** | some historical data (real or synthetic) | immediately, against synthetic data |
+| **3b - Allocator + sbatch generation** | 3a's interface (a stub is enough) | as soon as 3a's input/output shape is agreed |
+| **3c - Evaluation** | 3b working end-to-end | once 3b is validated |
 
-If the WP3 group is small, a reasonable 3-way split is one person per
-component (1, 2, 3), with component 3's person starting on **3b against a
-stubbed predictor** immediately rather than waiting on component 2 to
-finish - the predictor's real training data is the only genuinely
-sequential dependency in the whole chain; everything else can be
-developed against a mock and integrated later.
+For a small group, one person per component works well - with
+Component 3's person starting on **3b against a stubbed predictor**
+right away rather than waiting on Component 2. The predictor's need for
+real training data is the only hard sequential dependency; everything
+else can be built against a mock and wired up later.

@@ -13,7 +13,7 @@ participant needs to do on their own account.
 
 ## LUIS (Leibniz Universität Hannover / L3S)
 
-**Status:** primary HPC target for WP5. Already wired into `config/clusters.json` and `sync_luis.yml`.
+**Status:** primary HPC target for WP3 Component 1. Already wired into `config/clusters.json` and `sync_luis.yml`.
 
 ### Connection
 
@@ -59,7 +59,7 @@ The login node is a shared gateway. It **kills long-running or resource-intensiv
 
 `cluster-config/luis-apptainer.sh` is designed to run on the login node —
 it only does `apptainer pull` + a quick `apptainer run`, so it's fine there.
-Any real workload needs an `sbatch` script (WP5 DoD requires one).
+Any real workload needs an `sbatch` script (see `doc/wp3.md` Component 1 DoD).
 
 ### One-time setup per participant
 
@@ -83,7 +83,7 @@ Each participant uses their **own** LUIS account — there is no shared setup.
 
 | Problem | Fix |
 |---|---|
-| Login node kills your process | Move it to `sbatch` — see WP5 |
+| Login node kills your process | Move it to `sbatch` — see `doc/wp3.md` Component 1 |
 | `apptainer pull` fails with auth error | Run `apptainer registry login --username <gh-user> --password-stdin docker://ghcr.io` first (same as `docker login` but for Apptainer) |
 | Disk quota exceeded | Use `/bigwork/<username>/` not `~` for `.sif` files and code |
 | `sync_luis.yml` fails for one participant but not another | The `sync_path` in `clusters.json` must match each person's actual username — update your fork |

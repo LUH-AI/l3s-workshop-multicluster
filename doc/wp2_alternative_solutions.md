@@ -95,3 +95,23 @@ overhead there.
   Kubernetes-based rather than bare Docker/Apptainer hosts + SLURM. Not
   applicable to the current architecture; worth naming only to
   pre-empt "why not just use K8s" as a question.
+
+## Definition of Done for this session (3-4h total, shared with WP1/WP3)
+
+The writeup above is already done - reading it isn't the task. With a
+3-4h budget, WP2's job is to **spend ~30-45 minutes actually testing one
+specific claim from it**, not writing more comparison prose:
+
+- Take Fabric's `fab run-benchmark` example from
+  `doc/ansible-hpc-automation.md` and run it for real against the
+  Cluster A simulator, alongside `deploy.sh cluster-a <tag>`. Confirm
+  (or correct) the "does almost the same job" claim above with an actual
+  timing/complexity comparison, not just the written argument.
+- Document what actually happened (worked as claimed / didn't / took
+  longer to set up than expected) as a short addendum here - a
+  paragraph, not a rewrite of the existing sections.
+
+If there's time left over, the same treatment for Ansible's
+`setup_hpc.yml` against Cluster A is the next most useful thing to
+verify hands-on - but the Fabric comparison is the sharper, cheaper one
+to try first (see "Fabric" above for why).

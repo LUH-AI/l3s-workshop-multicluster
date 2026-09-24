@@ -16,14 +16,26 @@ full under `doc/`:
 - **[WP2 - Alternative Solutions](doc/wp2_alternative_solutions.md)** -
   why a custom pipeline over adopting Ansible/Fabric/etc. wholesale.
 - **[WP3 - Cluster Integration & Resource Optimization](doc/wp3.md)** -
-  the remaining/ongoing work: wiring up the rest of the real clusters,
-  running real experiments via PyExperimenter, and an AI-assisted
-  scheduler (runtime predictor + allocator, method open) that decides
-  where they run.
+  wiring up the rest of the real clusters, running experiments via
+  PyExperimenter, and an AI-assisted scheduler (runtime predictor +
+  allocator, method open) that decides where they run.
 
 See also `doc/clusters.md` (per-cluster connection details for
 LUIS/KISSKI/PC2) and `doc/ansible-hpc-automation.md` (the Ansible/Fabric
 tooling referenced in WP2).
+
+## Time budget: 3-4h total, across all three WPs
+
+Each WP doc has its own "Definition of Done for this session" scoped to
+that budget (WP1 §9, WP2's final section, WP3's "Scoped for a 3-4h
+session") - short version: WP1 is mostly already built (two concrete
+gaps left, ~1-1.5h), WP2 is one hands-on comparison test (~30-45 min,
+not a rewrite), WP3 runs entirely against the Cluster A simulator and
+synthetic data, not real historical data or PC2 (that needs an
+already-approved project - not something arranged during the session).
+Do WP0 individual setup and confirm `deploy.sh`/`verify.sh` work against
+Cluster A **before** splitting into groups - everything else depends on
+that.
 
 ## Model: everyone forks, everyone runs their own runner
 

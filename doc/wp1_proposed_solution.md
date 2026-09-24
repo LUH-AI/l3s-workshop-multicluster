@@ -247,3 +247,22 @@ simulator doesn't have its own isolated Docker state - `docker images`/
 in general, not something scoped to "this cluster." Fine for exercising
 `deploy.sh cluster-a ...` in isolation; not a real multi-tenancy
 boundary if this ever gets extended.
+
+## 9. Definition of Done for this session (3-4h total, shared with WP2/WP3)
+
+Most of what's described above is **already implemented** - this isn't a
+from-scratch build. The concrete, scoped work still open:
+
+- Replace the file-based `SSH_PRIVATE_KEY` handling in `deploy.yml`/
+  `health.yml`/`sync_luis.yml` with the `ssh-agent`/RAM-only flow from §5
+- Test the SSH reverse tunnel from §7 against the Cluster A simulator
+  (§8) - a local test, no HPC access needed - and report whether it
+  actually works before Component 2 (WP3) builds on top of it
+- Everything else in §§1-4, 6, 8 is confirming the existing pipeline
+  still works (`docker ps`, a deploy + verify against Cluster A), not
+  building something new
+
+If WP1 has its own dedicated time/group, budget roughly 1-1.5h for the
+two items above; if it's mostly "already done," that time is better
+spent helping WP3 Component 2 validate the reverse tunnel live, since
+that's a shared dependency, not just a WP1 concern.
