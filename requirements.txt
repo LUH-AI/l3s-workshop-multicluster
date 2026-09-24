@@ -1,2 +1,2 @@
-smac 
-pyexperimenter
+smac
+py-experimenter
