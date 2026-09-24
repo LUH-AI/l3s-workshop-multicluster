@@ -18,6 +18,55 @@ config/clusters.json     central DB (WP1) +          historical runs from
                                                         -> generated sbatch configs
 ```
 
+## Prerequisites
+
+Before starting WP3 at all - beyond the general WP0/WP1 §0 setup
+(Docker, SSH key, runner running):
+
+- **WP1's pipeline already working against Cluster A** -
+  `deploy.sh`/`verify.sh`/`preflight.sh` succeed there (see WP1 §8).
+  Component 1 extends something that already works to more clusters; it
+  doesn't stand on its own.
+- **Accounts + SSH access on the additional real clusters**, beyond LUIS
+  (already covered by WP0/`doc/clusters.md`):
+  - **KISSKI**: an Academic Cloud account, public key uploaded at
+    `id.academiccloud.de`, ~10 min propagation wait
+  - **PC2**: an *approved project* (`hpc-prf-<acronym>`) via
+    PC²-JARDS - this can take real calendar time to get approved, unlike
+    the same-day setup for the other clusters, so start it early
+- **SLURM/`squeue` access on whichever cluster(s) the Allocator
+  (Component 3) will query** - it reads live capacity from `squeue`, so
+  this needs to work on at least one real SLURM cluster before the
+  allocator can be tested against anything but static `clusters.json`
+  config
+- **Python 3.10** for anything using SMAC/PyExperimenter (both already in
+  `requirements.txt`) - SMAC's own pinned dependencies are most reliably
+  compatible with 3.10; newer versions risk dependency resolution
+  failures. The `Dockerfile` is already pinned to `python:3.10-slim`
+  accordingly - keep any local dev environment for Component 2/3 on 3.10
+  too, rather than whatever's newest on your machine.
+
+### How much of this needs real HPC access to test?
+
+Less than it looks like. Most of WP3 can be developed and tested against
+**only the Cluster A simulator**, no LUIS/KISSKI/PC2 account required:
+
+- **Component 1** is the exception - its actual point is wiring up the
+  real clusters, so genuinely validating it needs those accounts. The
+  config mechanics (entries following the `doc/clusters.md` templates,
+  the existing `docker`/`apptainer` branching in `deploy.sh`) can be
+  prepared without them, just not confirmed working.
+- **Component 2**'s worker loop and row-locking can be fully exercised
+  with multiple local processes against Cluster A - including the SSH
+  reverse tunnel from WP1 §7, which is explicitly supposed to be tried
+  there first anyway (§ above). Only SLURM-specific failure modes (e.g. a
+  stale lock left behind by an `sbatch` timeout) need a real HPC target.
+- **Component 3**: the runtime predictor can be built/tested against
+  synthetic historical data (see "Splitting into parallel sub-tasks"
+  below); the allocator's assignment logic can be tested against mocked
+  capacity numbers. Only the live `squeue` read needs a real SLURM
+  cluster - everything upstream of that call doesn't.
+
 ---
 
 ## Component 1: Cluster Configs
@@ -128,41 +177,29 @@ validated:
 
 ---
 
-## Component 3: AI-Assisted Scheduling Tool 
+## Component 3: AI-Assisted Scheduling Tool
 
 ### Scope
 
 Given a set of open experiments and several clusters with different,
-time-varying capacity, decide which experiment runs where - instead of
-first-come-first-served. Two stages:
+time-varying capacity, decide how compute gets allocated across clusters
+- instead of first-come-first-served. Two pieces, both deliberately open
+on method:
 
-**1. Runtime Predictor**
+- **Runtime Predictor:** estimates runtime/resource need for open
+  experiments, trained on historical results from Component 2's central
+  DB. Needs a cold-start fallback for before enough history exists.
+  Model/features not decided yet.
+- **Allocator:** given those estimates plus live cluster capacity
+  (`config/clusters.json` + `squeue`), decides how much compute to run
+  where and generates the `sbatch` configs to start it. Algorithm not
+  decided yet.
 
-- Input: an open experiment's parameters (+ whatever metadata is
-  available before it runs).
-- Output: predicted runtime / resource need.
-- Trained on historical PyExperimenter results from Component 2's central
-  DB - so this component has a hard data dependency on Component 2
-  actually having produced enough completed runs to train on. Cold-start
-  (no history yet) needs a fallback (e.g. a fixed estimate, or FCFS until
-  enough data exists).
-- **Deliberately open:** which model, which features, how it's
-  trained/retrained - none of that is decided yet. That's part of the
-  work, best informed by what the actual historical data looks like once
-  it exists, not fixed upfront.
-
-**2. Allocator**
-
-- Input: the predictor's estimates for all open experiments + live
-  cluster capacity (`config/clusters.json` for what's configured, `squeue`
-  for what's actually free right now on SLURM-based clusters).
-- Output: an experiment -> cluster assignment, from which `sbatch`
-  configs are generated automatically (reusing the `sbatch` template
-  pattern already established for LUIS-style deploys).
-- **Deliberately open:** how the assignment gets computed - the right
-  approach depends on tradeoffs (solution quality vs. the allocator's own
-  runtime cost, see Evaluation) that aren't clear yet, so it isn't fixed
-  upfront either.
+One structural point worth keeping in mind regardless of method: since
+PyExperimenter itself has no concept of clusters (workers just pull
+whatever's next from the central DB), the Allocator naturally works one
+level above it - controlling how many workers run on each cluster -
+rather than assigning individual experiments directly.
 
 ### Evaluation
 
@@ -199,15 +236,14 @@ The three components are already a natural split - the dependency chain
 before earlier ones are fully done, as long as the interface between them
 is agreed on early:
 
-| Sub-task                                                | Depends on                                                          | Can start once                                                                     | Notes                                                                                                                   |
-| ------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| **1a - Wire remaining clusters**                  | nothing                                                             | immediately                                                                        | KISSKI/PC2 entries in`clusters.json`, per `doc/clusters.md` templates                                               |
-| **1b - Ansible/Fabric setup vs. current scripts** | 1a's entries exist                                                  | immediately, in parallel with 1a                                                   | decide once, don't build both paths long-term                                                                           |
-| **2a - PyExperimenter worker in the container**   | Component 1 has*one* working cluster                              | as soon as one target deploys reliably                                             | doesn't need all 5 clusters, just 1-2 to develop against                                                                |
-| **2b - Central DB reachability validation**       | none - can run standalone                                           | immediately                                                                        | do this**first**, in parallel with everything else - it's the biggest risk in the whole WP, see the callout above |
-| **3a - Runtime predictor**                        | Component 2 producing real historical rows                          | once there's enough training data (dozens-hundreds of completed runs, not day one) | until then, build/test the pipeline against synthetic historical data so the code is ready when real data exists; model/feature choice is open, see Component 3 |
-| **3b - Allocator (first working version) + sbatch generation** | 3a's prediction interface (can be a stub returning fixed estimates) | as soon as 3a's function signature is agreed, before it's actually trained         | integrate with the real predictor last; approach is open, see Component 3                                               |
-| **3c - Second allocation approach + evaluation**  | 3b working end-to-end                                               | once 3b is validated                                                               | only worth doing once there's a working baseline to compare against - whether a second approach is even needed is itself open |
+| Sub-task                                                             | Depends on                                                          | Can start once                                                                     | Notes                                                                                                                                                           |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1a - Wire remaining clusters**                               | nothing                                                             | immediately                                                                        | KISSKI/PC2 entries in`clusters.json`, per `doc/clusters.md` templates                                                                                       |
+| **2a - PyExperimenter worker in the container**                | Component 1 has*one* working cluster                              | as soon as one target deploys reliably                                             | doesn't need all 5 clusters, just 1-2 to develop against                                                                                                        |
+| **2b - Central DB reachability validation**                    | none - can run standalone                                           | immediately                                                                        | do this**first**, in parallel with everything else - it's the biggest risk in the whole WP, see the callout above                                         |
+| **3a - Runtime predictor**                                     | Component 2 producing real historical rows                          | once there's enough training data (dozens-hundreds of completed runs, not day one) | until then, build/test the pipeline against synthetic historical data so the code is ready when real data exists; model/feature choice is open, see Component 3 |
+| **3b - Allocator (first working version) + sbatch generation** | 3a's prediction interface (can be a stub returning fixed estimates) | as soon as 3a's function signature is agreed, before it's actually trained         | integrate with the real predictor last; approach is open, see Component 3                                                                                       |
+| **3c - Second allocation approach + evaluation**               | 3b working end-to-end                                               | once 3b is validated                                                               | only worth doing once there's a working baseline to compare against - whether a second approach is even needed is itself open                                   |
 
 If the WP3 group is small, a reasonable 3-way split is one person per
 component (1, 2, 3), with component 3's person starting on **3b against a
