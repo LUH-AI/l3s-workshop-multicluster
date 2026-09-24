@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Prepares one local "cluster" node as a Docker container: sshd + docker CLI
 # talking to the host's Docker socket. This lets the runner SSH into a
-# container exactly like it would SSH into Cluster A/B, so the whole
+# container exactly like it would SSH into Cluster A, so the whole
 # pipeline can be tested end-to-end before real cluster access exists.
 #
 # Usage: ./local-docker.sh <container-name> <local-ssh-port> <ssh-user> <public-key-file> [restrict-command]
 #
 # The container name, port and user must match the corresponding entry in
-# config/clusters.json (see cluster-a-docker.sh / cluster-b-docker.sh for
-# the values already wired up there).
+# config/clusters.json (see cluster-a-docker.sh for the values already
+# wired up there).
 #
 # Security note: mounting /var/run/docker.sock into the container gives
 # whoever can exec into it root-equivalent access to the host - this is the
