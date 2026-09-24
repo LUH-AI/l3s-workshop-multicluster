@@ -94,24 +94,28 @@ experiment grid gets worked off by one or more parallel workers.
 
 ### Getting results back to the central DB
 
-The plan is an SSH reverse tunnel (`ssh -R`) from each cluster back to
-the runner, reusing the SSH connection that deployment already needs
-(details in `doc/wp1_proposed_solution.md` §7). **This hasn't been
-tested yet.** Try it against the Cluster A simulator first - cheap, no
-HPC access needed - before assuming it works on a real cluster.
+Don't block Component 2 on WP1 finishing the live tunnel - build against
+a safe default first, upgrade later if there's time:
 
-Two things to get right once it's working:
+- **Default: write results locally, sync them back.** Each worker writes
+  to a local file on the cluster; something pulls it back to the central
+  DB afterwards (same pattern as `sync.sh`). Not elegant, but it works
+  with whatever WP1 has finished so far, and it's enough to satisfy the
+  Definition of Done below on its own.
+- **Upgrade, if the WP1 group gets it working in time:** the SSH reverse
+  tunnel (`ssh -R`) described in `doc/wp1_proposed_solution.md` §7 gives
+  workers direct, live writes instead of a batch sync. Worth trying
+  against the Cluster A simulator if there's time - but treat it as a
+  nice-to-have you swap in later, not something Component 2 waits on.
 
-- The tunnel needs to stay up for as long as a job might run, not just
-  during `deploy.sh`'s brief SSH call.
+Either way:
+
 - Turn on SQLite's **WAL journal mode** before running concurrent
   workers - PyExperimenter's row-locking stops two workers claiming the
   same experiment, but it doesn't prevent SQLite write-contention on the
   file itself.
-
-If the tunnel doesn't work on a real cluster, that's a WP1-level
-decision to make (e.g. sync results after the fact instead of a live
-tunnel) - don't patch around it inside this component.
+- If using the live tunnel, it needs to stay up for as long as a job
+  might run, not just during `deploy.sh`'s brief SSH call.
 
 ### Definition of Done
 
@@ -119,7 +123,8 @@ tunnel) - don't patch around it inside this component.
   same deploy path Component 1 validated
 - At least two workers, on two different clusters, process the same
   experiment grid concurrently with zero duplicate executions
-- Results are verifiably present in the central DB after a run
+- Results are verifiably present in the central DB after a run - via
+  local sync or a live tunnel, either counts
 - A worker killed mid-experiment (login node kill, SLURM timeout)
   doesn't leave that experiment stuck "running" forever
 
@@ -171,14 +176,14 @@ Compare against a first-come-first-served baseline on:
 Later components can start before earlier ones are fully done, as long
 as the interface between them is agreed early:
 
-| Sub-task | Depends on | Can start |
-|---|---|---|
-| **1a - Wire KISSKI** | nothing | immediately |
-| **2a - PyExperimenter worker** | one working cluster | as soon as one target deploys reliably |
-| **2b - DB reachability test** | nothing | immediately - do this first, it's the biggest risk in the WP |
-| **3a - Runtime predictor** | some historical data (real or synthetic) | immediately, against synthetic data |
-| **3b - Allocator + sbatch generation** | 3a's interface (a stub is enough) | as soon as 3a's input/output shape is agreed |
-| **3c - Evaluation** | 3b working end-to-end | once 3b is validated |
+| Sub-task                                     | Depends on                               | Can start                                                                                       |
+| -------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **1a - Configs for HPCs**              | nothing                                  | immediately                                                                                     |
+| **2a - PyExperimenter worker**         | one working cluster                      | as soon as one target deploys reliably - build against the local-sync default, don't wait on 2b |
+| **2b - Live tunnel, optional upgrade** | WP1's tunnel work                        | whenever WP1 has it ready - not a blocker for 2a                                                |
+| **3a - Runtime predictor**             | some historical data (real or synthetic) | immediately, against synthetic data                                                             |
+| **3b - Allocator + sbatch generation** | 3a's interface (a stub is enough)        | as soon as 3a's input/output shape is agreed                                                    |
+| **3c - Evaluation**                    | 3b working end-to-end                    | once 3b is validated                                                                            |
 
 For a small group, one person per component works well - with
 Component 3's person starting on **3b against a stubbed predictor**

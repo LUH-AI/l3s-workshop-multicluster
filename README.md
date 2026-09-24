@@ -37,6 +37,14 @@ Do WP0 individual setup and confirm `deploy.sh`/`verify.sh` work against
 Cluster A **before** splitting into groups - everything else depends on
 that.
 
+**If the prototype at the end is the priority and time runs short:**
+WP2 is the one piece that doesn't feed it - it's a comparison writeup,
+not something WP3 depends on - so it's the first thing to shrink or cut.
+WP3 doesn't need to wait on WP1 either: Component 2 has a local-sync
+default for getting results into the central DB (see `doc/wp3.md`
+Component 2) so it isn't blocked if WP1's live SSH tunnel isn't ready in
+time - that tunnel is a nice-to-have upgrade, not a dependency.
+
 ## Model: everyone forks, everyone runs their own runner
 
 This repo is public. There's no shared infrastructure for individual
