@@ -24,7 +24,7 @@ config/clusters.json     central DB (WP1) +          historical runs from
 
 ### Scope
 
-Get every target cluster - Cluster A/B (Docker simulators), LUIS
+Get every target cluster - Cluster A (Docker simulator), LUIS
 (Apptainer, already wired), and the two clusters currently listed as "not
 yet in `config/clusters.json`" in `doc/clusters.md` (KISSKI, PC2) - into
 a state where `deploy.sh`/`verify.sh`/`sync.sh` (or the Ansible/Fabric
@@ -52,9 +52,9 @@ KISSKI and PC2. What's still open:
 
 ### Definition of Done
 
-- `config/clusters.json` has working entries for Cluster A, Cluster B,
-  LUIS, KISSKI, and PC2 (or a documented reason one is deferred)
-- `scripts/preflight.sh` reports all five as reachable
+- `config/clusters.json` has working entries for Cluster A, LUIS, KISSKI,
+  and PC2 (or a documented reason one is deferred)
+- `scripts/preflight.sh` reports all four as reachable
 - A smoke deploy (`deploy.sh <cluster> dummy`, or the Ansible
   `setup_hpc.yml` equivalent) succeeds on each real cluster at least once
 - Storage-path and login-node-vs-compute-node quirks per cluster are
@@ -98,6 +98,7 @@ with no new inbound/outbound firewall rule needed anywhere.
 
 Two things from that design Component 2 needs to actually rely on when
 implementing the worker's DB connection:
+
 - The tunnel must be **up before a worker tries to write**, and for the
   whole duration a `sbatch` job might run - not just during `deploy.sh`'s
   brief SSH call (see WP1 §7's persistent-tunnel note).
@@ -119,7 +120,7 @@ implementing the worker's DB connection:
 
 ---
 
-## Component 3: AI-Assisted Scheduling Tool (core contribution)
+## Component 3: AI-Assisted Scheduling Tool 
 
 ### Scope
 
@@ -128,6 +129,7 @@ time-varying capacity, decide which experiment runs where - instead of
 first-come-first-served. Two stages:
 
 **1. Runtime Predictor**
+
 - Input: an open experiment's parameters (+ whatever metadata is
   available before it runs).
 - Output: predicted runtime / resource need.
@@ -138,6 +140,7 @@ first-come-first-served. Two stages:
   fallback (e.g. a fixed estimate, or FCFS until enough data exists).
 
 **2. Allocator**
+
 - Input: the predictor's estimates for all open experiments + live
   cluster capacity (`config/clusters.json` for what's configured, `squeue`
   for what's actually free right now on SLURM-based clusters).
@@ -155,6 +158,7 @@ first-come-first-served. Two stages:
 
 Compare against a **first-come-first-served baseline** (the "do nothing
 clever" default) on:
+
 - **Makespan** - total wall-clock time to finish a batch of experiments
 - **Cluster utilization** - % of available capacity actually used over
   the run
@@ -183,15 +187,15 @@ The three components are already a natural split - the dependency chain
 before earlier ones are fully done, as long as the interface between them
 is agreed on early:
 
-| Sub-task | Depends on | Can start once | Notes |
-|---|---|---|---|
-| **1a - Wire remaining clusters** | nothing | immediately | KISSKI/PC2 entries in `clusters.json`, per `doc/clusters.md` templates |
-| **1b - Ansible/Fabric setup vs. current scripts** | 1a's entries exist | immediately, in parallel with 1a | decide once, don't build both paths long-term |
-| **2a - PyExperimenter worker in the container** | Component 1 has *one* working cluster | as soon as one target deploys reliably | doesn't need all 5 clusters, just 1-2 to develop against |
-| **2b - Central DB reachability validation** | none - can run standalone | immediately | do this **first**, in parallel with everything else - it's the biggest risk in the whole WP, see the callout above |
-| **3a - Runtime predictor** | Component 2 producing real historical rows | once there's enough training data (dozens-hundreds of completed runs, not day one) | until then, build/test the pipeline against synthetic historical data so the code is ready when real data exists |
-| **3b - Greedy allocator + sbatch generation** | 3a's prediction interface (can be a stub returning fixed estimates) | as soon as 3a's function signature is agreed, before it's actually trained | integrate with the real predictor last |
-| **3c - ILP variant + evaluation** | 3b working end-to-end | once greedy is validated | stretch goal - only meaningful once there's a working baseline to compare against |
+| Sub-task                                                | Depends on                                                          | Can start once                                                                     | Notes                                                                                                                   |
+| ------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **1a - Wire remaining clusters**                  | nothing                                                             | immediately                                                                        | KISSKI/PC2 entries in`clusters.json`, per `doc/clusters.md` templates                                               |
+| **1b - Ansible/Fabric setup vs. current scripts** | 1a's entries exist                                                  | immediately, in parallel with 1a                                                   | decide once, don't build both paths long-term                                                                           |
+| **2a - PyExperimenter worker in the container**   | Component 1 has*one* working cluster                              | as soon as one target deploys reliably                                             | doesn't need all 5 clusters, just 1-2 to develop against                                                                |
+| **2b - Central DB reachability validation**       | none - can run standalone                                           | immediately                                                                        | do this**first**, in parallel with everything else - it's the biggest risk in the whole WP, see the callout above |
+| **3a - Runtime predictor**                        | Component 2 producing real historical rows                          | once there's enough training data (dozens-hundreds of completed runs, not day one) | until then, build/test the pipeline against synthetic historical data so the code is ready when real data exists        |
+| **3b - Greedy allocator + sbatch generation**     | 3a's prediction interface (can be a stub returning fixed estimates) | as soon as 3a's function signature is agreed, before it's actually trained         | integrate with the real predictor last                                                                                  |
+| **3c - ILP variant + evaluation**                 | 3b working end-to-end                                               | once greedy is validated                                                           | stretch goal - only meaningful once there's a working baseline to compare against                                       |
 
 If the WP3 group is small, a reasonable 3-way split is one person per
 component (1, 2, 3), with component 3's person starting on **3b against a

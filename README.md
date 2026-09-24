@@ -26,7 +26,7 @@ Local machine (your laptop)
                                                   | SSH deploy              ^ image pull
                                                   v                        |
 Target clusters
-  Cluster A (Docker, local sim)   Cluster B (Docker, local sim)   LUIS (Apptainer, HPC)
+  Cluster A (Docker, local sim)   LUIS (Apptainer, HPC)
 ```
 
 ## Repo structure
@@ -34,7 +34,7 @@ Target clusters
 ```
 multicluster-workshop/
 ├── .github/workflows/
-│   ├── deploy.yml          # workflow_dispatch: build + deploy to Cluster A/B
+│   ├── deploy.yml          # workflow_dispatch: build + deploy to Cluster A
 │   ├── health.yml          # manual verify run (no deploy)
 │   ├── sync_luis.yml       # on push to main: rsync code to LUIS (WP5)
 │   └── test_runner.yml     # minimal smoke test for your self-hosted runner
@@ -49,7 +49,6 @@ multicluster-workshop/
 ├── cluster-config/
 │   ├── local-docker.sh     # generic local Docker "cluster" node (sshd + docker CLI)
 │   ├── cluster-a-docker.sh # spin up Cluster A (port 2222, user clustera)
-│   ├── cluster-b-docker.sh # spin up Cluster B (port 2223, user clusterb)
 │   └── luis-apptainer.sh   # test pull+run on a real LUIS login node
 ├── src/hello.py             # placeholder workload (WP6 replaces this with PyExperimenter)
 ├── deploy.sh                 # wrapper -> scripts/deploy.sh (so `./deploy.sh ...` works too)
@@ -93,16 +92,15 @@ One entry per cluster, keyed by name:
 }
 ```
 
-`type` is `docker` (Cluster A/B, deployed via `docker pull && docker run`)
+`type` is `docker` (Cluster A, deployed via `docker pull && docker run`)
 or `apptainer` (LUIS, deployed as `apptainer pull` into
 `project_<tag>.sif` + `apptainer run`). `deploy.sh`/`verify.sh` both read
 this file - keep cluster names, `key` and `type` in sync with whatever
 `cluster-config/*.sh` actually starts.
 
-Build the two local simulators with:
+Build the local simulator with:
 ```
 ./cluster-config/cluster-a-docker.sh ~/workshop-keys/runner_key.pub
-./cluster-config/cluster-b-docker.sh ~/workshop-keys/runner_key.pub
 ```
 
 ## Secrets
@@ -115,10 +113,10 @@ fork), both consumed by the workflows, not committed anywhere:
 | `GHCR_TOKEN` | `docker login` when pushing the build in `deploy.yml`; optionally reused by `deploy.sh` to log in on the *target* cluster before pulling | Always, for the push. For pulling: only if your GHCR package is **private** - the simplest alternative is making it public, then no pull-side auth is needed at all |
 | `SSH_PRIVATE_KEY` | written to `~/workshop-keys/runner_key` at the start of every job that needs SSH (deploy, verify, sync) | Recommended, so the workflow doesn't depend on that file already existing on whatever machine runs your runner |
 
-The local Docker simulators (Cluster A/B) never need pull-side auth: they
-share the host's `docker.sock`, so they inherit whatever `docker login` you
+The local Docker simulator (Cluster A) never needs pull-side auth: it
+shares the host's `docker.sock`, so it inherits whatever `docker login` you
 already ran on your laptop. A genuinely separate remote cluster (a real
-Cluster A/B, or LUIS) does need it if its package is private.
+Cluster A, or LUIS) does need it if its package is private.
 
 ## Work packages & Definition of Done
 
@@ -127,12 +125,12 @@ Cluster A/B, or LUIS) does need it if its package is private.
 | WP0 | everyone | individual setup (see above) - prerequisite, no group scope |
 | WP1 | `.github/workflows/deploy.yml` | `workflow_dispatch` with per-cluster checkboxes + build toggle, independent `if:` jobs, merges WP2-WP4 into one workflow |
 | WP2 | `Dockerfile` | image build, Git-SHA + digest tagging, GHCR push, Docker-vs-Apptainer write-up |
-| WP3 | `scripts/deploy.sh` | SSH-based deploy to Cluster A/B, optional `scripts/sync.sh` |
+| WP3 | `scripts/deploy.sh` | SSH-based deploy to Cluster A, optional `scripts/sync.sh` |
 | WP4 | `scripts/verify.sh` | compares Git commit vs. what's actually running per cluster |
 | WP5 | LUIS/Apptainer | same deploy logic as WP3 but Apptainer + `sbatch`, tested on each member's own LUIS account |
 | WP6 (stretch) | PyExperimenter | replaces `hello.py` with a real parameterized workload, per-cluster SQLite (no shared DB - see below) |
 
-**WP1 DoD:** checkboxes for Cluster A/B + build toggle defined (LUIS is
+**WP1 DoD:** a checkbox for Cluster A + build toggle defined (LUIS is
 deliberately not in this workflow); each cluster has its own `if:` job;
 jobs call `deploy.sh`/`verify.sh` with agreed parameters; a failure in one
 cluster job doesn't block the other; runs end-to-end at least once on your
@@ -147,8 +145,8 @@ Docker-vs-Apptainer write-up (daemon/root, image format, execution
 model/SLURM); classic-PAT pitfall documented.
 
 **WP3 DoD:** dedicated SSH key used (not your personal one);
-`deploy.sh cluster-a <tag>` and `deploy.sh cluster-b <tag>` succeed against
-the local simulators; exit code unambiguous (0/success, ≠0/failure);
+`deploy.sh cluster-a <tag>` succeeds against the local simulator; exit
+code unambiguous (0/success, ≠0/failure);
 restricted SSH access discussed (`command=` restriction, even if not
 implemented in the simulator); Docker-socket GID mismatch pitfall
 documented (see `cluster-config/local-docker.sh` for one fix); unreachable
@@ -173,7 +171,7 @@ end-to-end individually.
 **WP6 DoD (optional):** minimal PyExperimenter setup runs inside the
 container on at least one cluster; results go to a local SQLite file per
 cluster, **not** a shared MySQL instance (a shared DB reachable from
-Cluster A, B *and* LUIS reintroduces the exact firewall/network dependency
+Cluster A *and* LUIS reintroduces the exact firewall/network dependency
 that caused delays with LUIS); a small script pulls results back per
 cluster (reuse the `sync.sh` pattern); documented why a shared DB was
 avoided.
@@ -195,8 +193,8 @@ avoided.
 | Time | Activity |
 |---|---|
 | 0:00-0:15 | Kick-off, confirm WP0 done, assign WP1-WP5 |
-| 0:15-1:15 | Group work using local Cluster A/B simulators (WP1-WP4) or own LUIS account (WP5) |
+| 0:15-1:15 | Group work using the local Cluster A simulator (WP1-WP4) or own LUIS account (WP5) |
 | 1:15-1:30 | Break + sync (interface mismatches between `deploy.sh`/`verify.sh` params) |
 | 1:30-2:30 | Integration: wire WP1-WP4 together, test end-to-end against Cluster A |
-| 2:30-3:00 | Harden: add Cluster B, integrate WP5, error handling |
+| 2:30-3:00 | Harden: integrate WP5 (LUIS), error handling |
 | 3:00-3:30 | Demo + retrospective |

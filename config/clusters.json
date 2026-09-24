@@ -6,13 +6,6 @@
     "key": "~/workshop-keys/runner_key",
     "type": "docker"
   },
-  "cluster-b": {
-    "host": "localhost",
-    "port": 2223,
-    "user": "clusterb",
-    "key": "~/workshop-keys/runner_key",
-    "type": "docker"
-  },
   "luis": {
     "host": "login.cluster.uni-hannover.de",
     "user": "<your-username>",

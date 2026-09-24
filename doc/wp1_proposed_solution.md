@@ -9,9 +9,9 @@ explicitly rather than glossed over.
 ## 1. Orchestration
 
 GitHub Actions, triggered via `workflow_dispatch`, with manual cluster
-selection (Cluster A, Cluster B, LUIS) as checkbox inputs. A run picks
-which clusters to touch; each selected cluster gets its own job so one
-cluster failing doesn't block the others.
+selection (Cluster A, LUIS) as checkbox inputs. A run picks which
+clusters to touch; each selected cluster gets its own job so one cluster
+failing doesn't block the others.
 
 ## 2. Container
 
@@ -126,3 +126,75 @@ instead of asking for a new one.
   PyExperimenter's row-locking (WP3 §Component 2) prevents two workers
   from claiming the same experiment - it doesn't by itself prevent SQLite
   write contention on the underlying file, which is a separate concern.
+
+## 8. Setting up and inspecting the example cluster (Cluster A)
+
+Before touching any real HPC target, the whole pipeline can be exercised
+against one local "cluster" stand-in - useful for developing/demoing WP1
+without needing LUIS/KISSKI/PC2 access at all. There is deliberately only
+one example cluster; a real second target is a genuinely different HPC
+system (LUIS et al.), not a second local simulator.
+
+### Setup
+
+```bash
+ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""   # once
+./cluster-config/cluster-a-docker.sh ~/workshop-keys/runner_key.pub
+```
+
+The script (via `cluster-config/local-docker.sh`) builds a small Debian
+image with `openssh-server` + the `docker` CLI, creates a `clustera` OS
+user, installs the given public key into that user's `authorized_keys`,
+and starts it as a container listening on `127.0.0.1:2222`. It also
+bind-mounts the **host's** `/var/run/docker.sock` in, and - since the
+image's own `docker` group GID won't automatically match whatever GID
+owns that socket - patches the user's group membership against the live
+socket GID right after start (see §4's runner-hardware rationale for why
+Docker-socket access is sensitive in the first place). This container is
+exactly what `config/clusters.json`'s `cluster-a` entry points at.
+
+### Verifying it's up, and that a deploy actually landed
+
+- **Direct SSH check** (does the simulator even accept the key):
+  ```bash
+  ssh -p 2222 -i ~/workshop-keys/runner_key clustera@127.0.0.1
+  ```
+- **`scripts/preflight.sh`** - loops over every entry in
+  `config/clusters.json` and reports plain reachability (SSH connects at
+  all), independent of whether anything's been deployed yet.
+- **`scripts/verify.sh [tag]`** - the real check: SSHes in and asks the
+  simulator's Docker (see below) what the newest matching image actually
+  is, then compares it against the current Git commit (or an explicit
+  `<tag>`). Reports `✓` (matches), `OUTDATED` (something's there, wrong
+  commit), or `UNREACHABLE` - the three states this is designed to keep
+  distinct.
+- **Manual inspection**, if `verify.sh` says something unexpected:
+  ```bash
+  ssh -p 2222 -i ~/workshop-keys/runner_key clustera@127.0.0.1 docker images
+  ssh -p 2222 -i ~/workshop-keys/runner_key clustera@127.0.0.1 docker ps -a
+  ```
+
+### What's actually stored there (and the catch)
+
+The simulator container itself holds almost nothing: just `sshd`, the
+Docker CLI binary, and the `clustera` user with its `authorized_keys`.
+**No image or container data lives inside it.**
+
+That's because `deploy.sh`'s remote command is
+`docker pull ... && docker run --rm ...` executed against the *shared*,
+bind-mounted host socket - so the pulled image and any (briefly) running
+container are actually stored in the **host machine's own Docker Engine**
+(its normal image/container storage, e.g. `/var/lib/docker` on Linux, or
+the Docker Desktop VM's disk on macOS), exactly as if you'd run
+`docker pull`/`docker run` on the host directly. `--rm` removes the
+*container* the moment `hello.py` exits, so nothing running persists
+either way - what actually persists, and what `verify.sh` inspects, is
+the **pulled image** sitting in that shared image cache (`docker images`,
+newest tag matching the registry prefix).
+
+Worth keeping in mind precisely because it's a shared socket: Cluster A's
+simulator doesn't have its own isolated Docker state - `docker images`/
+`docker ps` run against it shows whatever is on the host's Docker engine
+in general, not something scoped to "this cluster." Fine for exercising
+`deploy.sh cluster-a ...` in isolation; not a real multi-tenancy
+boundary if this ever gets extended.

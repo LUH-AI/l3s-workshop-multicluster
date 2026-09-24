@@ -7,10 +7,6 @@ on:
         description: 'Cluster A'
         type: boolean
         default: true
-      deploy_cluster_b:
-        description: 'Cluster B'
-        type: boolean
-        default: true
       build_container:
         description: 'Build container'
         type: boolean
@@ -57,24 +53,8 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
-  deploy-cluster-b:
-    needs: build
-    if: ${{ always() && inputs.deploy_cluster_b && !failure() && !cancelled() }}
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up SSH key
-        run: |
-          mkdir -p ~/workshop-keys
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/workshop-keys/runner_key
-          chmod 600 ~/workshop-keys/runner_key
-      - run: ./scripts/deploy.sh cluster-b ${{ needs.build.outputs.tag }}
-        env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-
   verify:
-    needs: [build, deploy-cluster-a, deploy-cluster-b]
+    needs: [build, deploy-cluster-a]
     if: always()
     runs-on: self-hosted
     steps:
@@ -87,7 +67,7 @@ jobs:
       - run: ./scripts/verify.sh ${{ needs.build.outputs.tag }}
 
   summary:
-    needs: [build, deploy-cluster-a, deploy-cluster-b, verify]
+    needs: [build, deploy-cluster-a, verify]
     if: always()
     runs-on: self-hosted
     steps:
@@ -100,6 +80,5 @@ jobs:
             echo "|---|---|"
             echo "| Build | ${{ needs.build.result }} |"
             echo "| Cluster A | ${{ needs.deploy-cluster-a.result }} |"
-            echo "| Cluster B | ${{ needs.deploy-cluster-b.result }} |"
             echo "| Verify | ${{ needs.verify.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"

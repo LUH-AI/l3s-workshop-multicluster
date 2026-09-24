@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Prepares the local stand-in for Cluster A (see local-docker.sh for how it
-# works). Port/user here must match the "cluster-a" entry in
-# config/clusters.json. See cluster-b-docker.sh for Cluster B.
+# Prepares the local stand-in for Cluster A - the only example/simulator
+# cluster (see local-docker.sh for how it works). Port/user here must
+# match the "cluster-a" entry in config/clusters.json.
 #
 # Usage: ./cluster-a-docker.sh <public-key-file>
 set -euo pipefail

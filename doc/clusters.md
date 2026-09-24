@@ -1,7 +1,7 @@
 # Cluster configurations
 
 Reference for the three HPC targets supported by this workshop pipeline.
-The local Docker simulators (Cluster A/B) are covered in the main README —
+The local Docker simulator (Cluster A) is covered in the main README —
 this file covers the real clusters only.
 
 Each cluster has an entry in `config/clusters.json` that `deploy.sh`,
