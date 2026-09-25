@@ -198,7 +198,8 @@ ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""   # once
 ```
 
 The script (via `cluster-config/local-docker.sh`) builds a small Debian
-image with `openssh-server` + the `docker` CLI, creates a `clustera` OS
+image with `openssh-server` + the `docker` CLI + `rsync` (for
+`scripts/sync.sh`), creates a `clustera` OS
 user, installs the given public key into that user's `authorized_keys`,
 and starts it as a container listening on `127.0.0.1:2222`. It also
 bind-mounts the **host's** `/var/run/docker.sock` in, and - since the
@@ -232,7 +233,9 @@ exactly what `config/clusters.json`'s `cluster-a` entry points at.
 ### What's actually stored there (and the catch)
 
 The simulator container itself holds almost nothing: just `sshd`, the
-Docker CLI binary, and the `clustera` user with its `authorized_keys`.
+Docker CLI binary, `rsync`, the `clustera` user with its
+`authorized_keys`, and - once `sync.sh` has run - a plain copy of the repo
+source in `/home/clustera/workshop` (its `sync_path`).
 **No image or container data lives inside it.**
 
 That's because `deploy.sh`'s remote command is

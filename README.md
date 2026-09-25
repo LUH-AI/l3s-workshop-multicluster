@@ -82,7 +82,7 @@ multicluster-workshop/
 ├── scripts/
 │   ├── deploy.sh             # ./scripts/deploy.sh <cluster-name> <image-tag>
 │   ├── verify.sh             # ./scripts/verify.sh [tag] - expected vs. actual per cluster
-│   ├── sync.sh                # ./scripts/sync.sh <cluster-name> - rsync source (default: luis)
+│   ├── sync.sh                # ./scripts/sync.sh [cluster-name] - rsync source (default: every cluster with a sync_path)
 │   ├── preflight.sh           # local tooling + SSH reachability checks
 │   └── create-deployment-info.sh  # optional: commit/tag/timestamp JSON (not wired into CI)
 ├── cluster-config/
@@ -106,6 +106,12 @@ multicluster-workshop/
 
 Do this before anything else - none of the scripts or workflows below can
 be tested without it. You'll need Docker installed locally.
+
+**Supported platforms:** macOS and Linux. The scripts need `bash`, `jq`,
+`rsync`, `ssh` and `docker` (macOS: `brew install jq`; Debian/Ubuntu:
+`sudo apt install jq rsync`). Windows works only via **WSL2** with Docker
+Desktop's WSL backend - run the scripts *and* the self-hosted runner inside
+WSL; PowerShell and Git Bash lack `rsync`/`jq`.
 
 1. Fork this repo, clone your fork.
 2. In `scripts/deploy.sh` and `scripts/verify.sh`, change
@@ -151,9 +157,14 @@ One entry per cluster, keyed by name:
 
 ```json
 {
-  "cluster-a": { "host": "localhost", "port": 2222, "user": "clustera", "key": "~/workshop-keys/runner_key", "type": "docker" }
+  "cluster-a": { "host": "localhost", "port": 2222, "user": "clustera", "key": "~/workshop-keys/runner_key", "type": "docker", "sync_path": "/home/clustera/workshop" }
 }
 ```
+
+`sync_path` is optional: only clusters that have one are targeted by
+`scripts/sync.sh`/`sync.yml`. Cluster A doesn't strictly need it (its
+deployed image already contains the code), but having it lets the sync
+pipeline be tested end-to-end locally.
 
 `type` is `docker` (Cluster A, deployed via `docker pull && docker run`)
 or `apptainer` (LUIS/KISSKI/PC2, deployed as `apptainer pull` into
@@ -222,6 +233,7 @@ Cluster A, or LUIS/KISSKI/PC2) does need it if its package is private.
 | GHCR login fails with a fine-grained token | Use a classic PAT with `write:packages` (add `repo` only if your fork is private) |
 | `docker: permission denied ... docker.sock` in the simulator | GID mismatch between host socket and container group - `cluster-config/local-docker.sh` fixes this at container start |
 | YAML workflow: `No event triggers defined in on` | Usually a copy-paste formatting issue - rewrite with `cat > file << 'EOF' ... EOF` |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED` when connecting to Cluster A | Rebuilding the simulator generates new host keys. `cluster-config/local-docker.sh` removes the stale entry itself; for an older container run `ssh-keygen -R "[localhost]:2222"` once |
 | SSH key auth doesn't work | Check permissions: `chmod 700 ~/.ssh`, `chmod 600 ~/.ssh/authorized_keys` |
 | `usermod` not found on macOS | Docker Desktop handles the docker group itself, no setup needed |
 | LUIS login node kills processes | Only run short tests there; real workloads go through `sbatch`/SLURM |

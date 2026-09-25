@@ -2,8 +2,8 @@ name: Sync source code
 
 # Config-driven, not hardcoded to one cluster: on every push, syncs the
 # repo to every cluster in config/clusters.json that defines a sync_path
-# (currently LUIS; KISSKI/PC2 pick this up automatically once they're
-# wired in). workflow_dispatch lets you target just one cluster instead.
+# (currently only the cluster-a simulator; LUIS/KISSKI/PC2 pick this up
+# automatically once they're added with one). workflow_dispatch lets you target just one cluster instead.
 
 on:
   push:

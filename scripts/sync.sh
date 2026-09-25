@@ -4,14 +4,14 @@
 # Rsyncs the repo to one cluster (if given) or to every cluster in
 # config/clusters.json that defines a sync_path (if omitted) - meant for
 # HPC/Apptainer targets where having raw source on disk is useful (e.g.
-# for `pixi install`), not for Docker simulators like cluster-a, whose
-# deployed image already contains everything and typically has no
-# sync_path at all.
+# for `pixi install`). Docker targets don't need it (their deployed image
+# already contains everything); the cluster-a simulator has one anyway so
+# the sync pipeline can be tested locally.
 set -euo pipefail
 
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
 
-command -v jq &> /dev/null || { echo "ERROR: jq is not installed"; exit 1; }
+command -v jq &> /dev/null || { echo "ERROR: jq is not installed (macOS: brew install jq, Debian/Ubuntu: sudo apt install jq)"; exit 1; }
 
 sync_one() {
   local CLUSTER_NAME="$1"

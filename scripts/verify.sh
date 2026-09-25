@@ -6,7 +6,7 @@ REGISTRY="ghcr.io/evavormschlag/project"
 EXPECTED_TAG="${1:-$(git rev-parse --short HEAD)}"
 
 if ! command -v jq &> /dev/null; then
-  echo "ERROR: jq is not installed (brew install jq)"
+  echo "ERROR: jq is not installed (macOS: brew install jq, Debian/Ubuntu: sudo apt install jq)"
   exit 1
 fi
 
