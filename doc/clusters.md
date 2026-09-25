@@ -43,8 +43,10 @@ SSH command: `ssh <your-username>@login.cluster.uni-hannover.de`
 `sync.sh luis` (and `sync.yml`, which runs it for every cluster with a
 `sync_path`, so this one too once it's added) rsyncs to `/bigwork/<username>/multicluster-workshop/`,
 matching the `sync_path` in `clusters.json`. The `apptainer pull` in `deploy.sh`
-also lands the `.sif` file in the home directory by default — consider adjusting to
-`/bigwork/<username>/project_<tag>.sif` if you hit quota limits.
+also lands the `.sif` file in the home directory by default. Only the current one is
+kept (older `project_*.sif` files are deleted after each successful pull), but a single
+image can still be large — consider adjusting to `/bigwork/<username>/project_<tag>.sif`
+if you hit quota limits.
 
 ### Environment and container runtime
 

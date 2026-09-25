@@ -19,6 +19,8 @@ on:
 jobs:
   build:
     runs-on: self-hosted
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -48,3 +50,63 @@ jobs:
             echo "- \`ghcr.io/${{ github.repository_owner }}/project:${{ steps.vars.outputs.tag }}\`"
             echo "- \`ghcr.io/${{ github.repository_owner }}/project:dummy\` (stable tag - use this if you don't need a specific commit)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Config-driven, like sync.yml: reads the cluster list from
+  # config/clusters.json, so a new entry there is picked up automatically.
+  clusters:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: self-hosted
+    outputs:
+      names: ${{ steps.list.outputs.names }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: echo "names=$(jq -c 'keys' config/clusters.json)" >> "$GITHUB_OUTPUT"
+
+  # Pull-only deploy of the freshly pushed image to every cluster (deploy.sh
+  # without --run), so each one has the latest commit ready. Nothing is
+  # started - on HPC targets experiments go through sbatch. One job per
+  # cluster, fail-fast off, so one unreachable cluster doesn't cancel the
+  # others.
+  pull:
+    needs: [build, clusters]
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        cluster: ${{ fromJSON(needs.clusters.outputs.names) }}
+    name: pull (${{ matrix.cluster }})
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up SSH agent
+        run: |
+          eval "$(ssh-agent -s)"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+      - run: ./scripts/deploy.sh ${{ matrix.cluster }} ${{ needs.build.outputs.tag }}
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+      - name: Stop SSH agent
+        if: always()
+        run: ssh-agent -k
+
+  # verify.sh already loops over every cluster itself - runs once after all
+  # pulls, also when some of them failed, so the table shows which ones.
+  verify:
+    needs: [build, pull]
+    if: ${{ always() && needs.build.result == 'success' && github.event_name == 'push' }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up SSH agent
+        run: |
+          eval "$(ssh-agent -s)"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+      - run: ./scripts/verify.sh ${{ needs.build.outputs.tag }}
+      - name: Stop SSH agent
+        if: always()
+        run: ssh-agent -k

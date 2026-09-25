@@ -2,8 +2,8 @@
 # Prepares/tests the LUIS target. Unlike Cluster A/B, LUIS isn't simulated
 # via a local Docker container here: Apptainer needs real Linux user
 # namespaces that don't nest well inside Docker. Run this directly on a
-# LUIS login node to test the pull+run steps deploy.sh performs remotely
-# over SSH (see WP5).
+# LUIS login node to test the pull (and `--run` smoke-test) steps deploy.sh
+# performs remotely over SSH (see WP5).
 #
 # Uses the same REGISTRY convention as scripts/deploy.sh/verify.sh - update
 # <org> below to your own GitHub username - and the same project_<tag>.sif

@@ -4,10 +4,22 @@ set -uo pipefail
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
 REGISTRY="ghcr.io/evavormschlag/project"
 EXPECTED_TAG="${1:-$(git rev-parse --short HEAD)}"
+# Optional: check only this cluster instead of every entry in clusters.json.
+ONLY_CLUSTER="${2:-}"
 
 if ! command -v jq &> /dev/null; then
   echo "ERROR: jq is not installed (macOS: brew install jq, Debian/Ubuntu: sudo apt install jq)"
   exit 1
+fi
+
+if [[ -n "$ONLY_CLUSTER" ]]; then
+  if ! jq -e --arg c "$ONLY_CLUSTER" 'has($c)' "$CONFIG_FILE" &> /dev/null; then
+    echo "ERROR: cluster '$ONLY_CLUSTER' not found in $CONFIG_FILE"
+    exit 1
+  fi
+  CLUSTERS="$ONLY_CLUSTER"
+else
+  CLUSTERS=$(jq -r 'keys[]' "$CONFIG_FILE")
 fi
 
 echo "Expected tag (current git commit): $EXPECTED_TAG"
@@ -17,7 +29,7 @@ printf "%-12s %-15s %s\n" "-------" "-------------" "------"
 
 OVERALL_STATUS=0
 
-for CLUSTER_NAME in $(jq -r 'keys[]' "$CONFIG_FILE"); do
+for CLUSTER_NAME in $CLUSTERS; do
   HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CONFIG_FILE")
   PORT=$(jq -r ".\"$CLUSTER_NAME\".port // 22" "$CONFIG_FILE")
   USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")

@@ -72,16 +72,16 @@ Target clusters
 ```
 multicluster-workshop/
 ├── .github/workflows/
-│   ├── build.yml            # pushes ghcr.io/<you>/project:dummy - a placeholder image, independent of a full deploy
-│   ├── deploy.yml            # workflow_dispatch: build + deploy to Cluster A
+│   ├── build.yml            # on push to main: pushes ghcr.io/<you>/project:<sha> + :dummy, then pull-only deploy to every cluster in clusters.json
+│   ├── deploy.yml            # workflow_dispatch: build + deploy to one cluster or all in clusters.json
 │   ├── health.yml            # manual verify run (no deploy)
 │   ├── sync.yml               # on push to main: rsync code to every cluster with a sync_path
 │   └── test_runner.yml       # minimal smoke test for your self-hosted runner
 ├── config/
 │   └── clusters.json         # cluster-name -> {host, port, user, key, type, ...}
 ├── scripts/
-│   ├── deploy.sh             # ./scripts/deploy.sh <cluster-name> <image-tag>
-│   ├── verify.sh             # ./scripts/verify.sh [tag] - expected vs. actual per cluster
+│   ├── deploy.sh             # ./scripts/deploy.sh <cluster-name> <image-tag> [--run] - pull only unless --run
+│   ├── verify.sh             # ./scripts/verify.sh [tag] [cluster] - expected vs. actual per cluster (default: all)
 │   ├── sync.sh                # ./scripts/sync.sh [cluster-name] - rsync source (default: every cluster with a sync_path)
 │   ├── preflight.sh           # local tooling + SSH reachability checks
 │   └── create-deployment-info.sh  # optional: commit/tag/timestamp JSON (not wired into CI)
@@ -166,9 +166,15 @@ One entry per cluster, keyed by name:
 deployed image already contains the code), but having it lets the sync
 pipeline be tested end-to-end locally.
 
-`type` is `docker` (Cluster A, deployed via `docker pull && docker run`)
-or `apptainer` (LUIS/KISSKI/PC2, deployed as `apptainer pull` into
-`project_<tag>.sif` + `apptainer run`). `deploy.sh`/`verify.sh` both read
+`type` is `docker` (Cluster A, deployed via `docker pull`) or `apptainer`
+(LUIS/KISSKI/PC2, deployed as `apptainer pull` into `project_<tag>.sif`;
+after a successful pull every other `project_*.sif` in the home directory
+is deleted, so each cluster holds exactly the current image).
+A deploy only pulls by default - the image is placed on the cluster, not
+started, since on HPC targets a run from `deploy.sh` would land on the
+login node. Experiments are started separately (via `sbatch`); pass
+`--run` (or tick "run after pull" in `deploy.yml`) to also run it once as
+a smoke test. `deploy.sh`/`verify.sh` both read
 this file - keep cluster names, `key` and `type` in sync with whatever
 `cluster-config/*.sh` actually starts. See `doc/clusters.md` for the real
 clusters' connection details and `doc/wp1_proposed_solution.md` §8 for how
@@ -202,6 +208,12 @@ current Git SHA and a stable `:dummy` tag:
 ```
 ghcr.io/<you>/project:dummy
 ```
+
+On a push (not a manual run) it then also pulls that `<sha>` image onto
+**every cluster in `config/clusters.json`** - one job per cluster,
+`deploy.sh` without `--run`, followed by one `verify.sh` - so each
+cluster always has the latest commit ready. Nothing is started; on HPC
+targets experiments go through `sbatch`.
 
 Useful whenever you need *something* in GHCR to point `deploy.sh`/
 `verify.sh` at without waiting on a full `deploy.yml` run. Reuses the same

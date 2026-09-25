@@ -41,10 +41,11 @@ must be true," not "how to get there."
 
 ## 1. Orchestration
 
-GitHub Actions, triggered via `workflow_dispatch`, with manual cluster
-selection (Cluster A, LUIS) as checkbox inputs. A run picks which
-clusters to touch; each selected cluster gets its own job so one cluster
-failing doesn't block the others.
+GitHub Actions, triggered via `workflow_dispatch`, with a `cluster` text
+input: one cluster name, or empty for every entry in
+`config/clusters.json` - so new clusters need no workflow change. Each
+targeted cluster gets its own (matrix) job so one cluster failing
+doesn't block the others.
 
 ## 2. Container
 
@@ -58,7 +59,8 @@ SSH-based deployment: `deploy.sh <cluster> <sha>`. Critically, **clusters
 pull the image directly from GHCR themselves** (`docker pull`/`apptainer
 pull` executed on the target over SSH) - the runner never streams or
 proxies the image. The runner's SSH call just tells the remote host what
-to pull and run; the actual image transfer is target-to-GHCR, not
+to pull (and, only with `--run`, to start it once as a smoke test - by
+default nothing is run, since real workloads go through `sbatch`); the actual image transfer is target-to-GHCR, not
 target-to-runner-to-GHCR. This keeps the runner from becoming a transfer
 bottleneck and means image size is bounded only by the target's own link
 to GHCR, not by the runner's upload bandwidth.
@@ -238,8 +240,8 @@ Docker CLI binary, `rsync`, the `clustera` user with its
 source in `/home/clustera/workshop` (its `sync_path`).
 **No image or container data lives inside it.**
 
-That's because `deploy.sh`'s remote command is
-`docker pull ... && docker run --rm ...` executed against the *shared*,
+That's because `deploy.sh`'s remote command is `docker pull ...` (plus
+`&& docker run --rm ...` with `--run`) executed against the *shared*,
 bind-mounted host socket - so the pulled image and any (briefly) running
 container are actually stored in the **host machine's own Docker Engine**
 (its normal image/container storage, e.g. `/var/lib/docker` on Linux, or

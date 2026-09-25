@@ -1,15 +1,29 @@
 #!/usr/bin/env bash
+# Usage: ./deploy.sh <cluster-name> <image-tag> [--run]
+#
+# Default is pull-only: the image (docker) or project_<tag>.sif (apptainer)
+# is placed on the cluster but not started. On HPC targets a run from here
+# would execute on the login node, which kills real workloads - experiments
+# are started later via sbatch. --run additionally starts it once right
+# after the pull, as a smoke test.
 set -euo pipefail
 
 CLUSTER_NAME="${1:-}"
 IMAGE_TAG="${2:-}"
+RUN_AFTER_PULL=false
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
 REGISTRY="ghcr.io/evavormschlag/project"
 
 if [[ -z "$CLUSTER_NAME" || -z "$IMAGE_TAG" ]]; then
-  echo "Usage: ./deploy.sh <cluster-name> <image-tag>"
+  echo "Usage: ./deploy.sh <cluster-name> <image-tag> [--run]"
   exit 1
 fi
+
+case "${3:-}" in
+  "") ;;
+  --run) RUN_AFTER_PULL=true ;;
+  *) echo "ERROR: unknown option '$3' (only --run is supported)"; exit 1 ;;
+esac
 
 if ! command -v jq &> /dev/null; then
   echo "ERROR: jq is not installed (macOS: brew install jq, Debian/Ubuntu: sudo apt install jq)"
@@ -51,12 +65,22 @@ if [[ -n "${GHCR_TOKEN:-}" && -n "${GHCR_USER:-}" ]]; then
   fi
 fi
 
-echo "Deploying $REGISTRY:$IMAGE_TAG to $CLUSTER_NAME ($TYPE) at $HOST:$PORT ..."
+if [[ "$RUN_AFTER_PULL" == true ]]; then
+  echo "Deploying $REGISTRY:$IMAGE_TAG to $CLUSTER_NAME ($TYPE) at $HOST:$PORT (pull + run) ..."
+else
+  echo "Deploying $REGISTRY:$IMAGE_TAG to $CLUSTER_NAME ($TYPE) at $HOST:$PORT (pull only) ..."
+fi
 
 if [[ "$TYPE" == "docker" ]]; then
-  REMOTE_CMD="docker pull ${REGISTRY}:${IMAGE_TAG} && docker run --rm ${REGISTRY}:${IMAGE_TAG}"
+  REMOTE_CMD="docker pull ${REGISTRY}:${IMAGE_TAG}"
+  [[ "$RUN_AFTER_PULL" == true ]] && REMOTE_CMD+=" && docker run --rm ${REGISTRY}:${IMAGE_TAG}"
 elif [[ "$TYPE" == "apptainer" ]]; then
-  REMOTE_CMD="apptainer pull --force project_${IMAGE_TAG}.sif docker://${REGISTRY}:${IMAGE_TAG} && apptainer run project_${IMAGE_TAG}.sif"
+  # Only after a successful pull, drop every other project_*.sif so the
+  # home quota doesn't fill up with one .sif per push - the cluster keeps
+  # exactly the current one (verify.sh reads the tag from its filename).
+  REMOTE_CMD="apptainer pull --force project_${IMAGE_TAG}.sif docker://${REGISTRY}:${IMAGE_TAG}"
+  REMOTE_CMD+=" && find . -maxdepth 1 -name 'project_*.sif' ! -name 'project_${IMAGE_TAG}.sif' -print -delete"
+  [[ "$RUN_AFTER_PULL" == true ]] && REMOTE_CMD+=" && apptainer run project_${IMAGE_TAG}.sif"
 else
   echo "ERROR: unknown type '$TYPE' for cluster '$CLUSTER_NAME'"
   exit 1
