@@ -6,5 +6,12 @@
     "key": "~/workshop-keys/runner_key",
     "type": "docker",
     "sync_path": "/home/clustera/workshop"
-  }
+  },
+  "luis": {
+  "host": "login.cluster.uni-hannover.de",
+  "user": "nhwpvore",
+  "key": "~/workshop-keys/runner_key",
+  "type": "apptainer",
+  "sync_path": "/bigwork/nhwpvore/multicluster-workshop"
+}
 }
