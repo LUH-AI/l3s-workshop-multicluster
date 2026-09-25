@@ -11,13 +11,12 @@ fi
 
 HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CONFIG_FILE")
 USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
-KEY=$(jq -r ".\"$CLUSTER_NAME\".key" "$CONFIG_FILE" | sed "s|~|$HOME|")
 REMOTE_PATH=$(jq -r ".\"$CLUSTER_NAME\".sync_path" "$CONFIG_FILE")
 
 echo "Syncing code to $CLUSTER_NAME ($USER@$HOST:$REMOTE_PATH) ..."
 
 rsync -avz --delete \
-  -e "ssh -i $KEY -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
+  -e "ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
   --exclude '.git' \
   --exclude '__pycache__' \
   "$(dirname "$0")/../" \

@@ -34,8 +34,9 @@ installed, but running:
 Also needed but usually already present on a normal dev machine: `git`,
 `jq` (all of `deploy.sh`/`verify.sh`/`preflight.sh` parse
 `config/clusters.json` with it), and a `GHCR_TOKEN` secret (classic PAT,
-`write:packages` + `repo`) for the push step in §2. The full step-by-step
-for all of the above is the README's WP0 section - this list is "what
+`write:packages` - `repo` only if your fork is private) for the push
+step in §2. The full step-by-step
+for all of the above is the README's Individual setup section - this list is "what
 must be true," not "how to get there."
 
 ## 1. Orchestration
@@ -88,23 +89,28 @@ SSH deploy keys live in GitHub Actions secrets and are loaded **only at
 runtime, into RAM via `ssh-agent`** - never written to disk on the runner
 hardware, even temporarily.
 
-**Current implementation gap:** the workflows as they exist today
-(`deploy.yml`, `health.yml`, `sync_luis.yml`) write the key to a file
-(`~/workshop-keys/runner_key`) at the start of each job. That's not what
-this section describes and should be replaced with an agent-based flow,
-roughly:
+**Implemented.** Every workflow that needs SSH (`deploy.yml`, `health.yml`,
+`sync_luis.yml`) starts an agent and adds the key straight from the
+secret, without it ever touching a file:
 
 ```bash
 eval "$(ssh-agent -s)"
-ssh-add - <<< "${SSH_PRIVATE_KEY}"     # key content never touches a file
+echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"   # persists to later steps in the job
+echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
 ```
+followed by a final `ssh-agent -k` cleanup step (`if: always()`) - the
+runner is a persistent machine (§4), not an ephemeral VM, so a leftover
+agent process from every run would otherwise just accumulate.
 
-...then dropping every script's `-i "$KEY"` argument in favor of letting
-`ssh`/`rsync` pick up the running agent via `SSH_AUTH_SOCK`. This also
-means `config/clusters.json`'s `key` field stops being a filesystem path
-and becomes unnecessary for auth (SSH just uses whatever the agent
-offers) - worth deciding whether to drop that field or keep it purely as
-documentation of which key a cluster expects.
+`scripts/deploy.sh`/`verify.sh`/`sync.sh`/`preflight.sh` no longer take a
+`-i <key>` argument - `ssh`/`rsync` pick up whatever the running agent
+offers. For local (non-CI) use, that means running
+`ssh-add ~/workshop-keys/runner_key` yourself once before using the
+scripts (see README Individual setup) - `scripts/preflight.sh` checks for
+this (`ssh-add -l`) and tells you if nothing's loaded.
+`config/clusters.json`'s `key` field is now purely documentation of which
+key a cluster expects, not something the scripts read.
 
 ## 6. Verification
 
@@ -250,19 +256,23 @@ boundary if this ever gets extended.
 
 ## 9. Definition of Done for this session (3-4h total, shared with WP2/WP3)
 
-Most of what's described above is **already implemented** - this isn't a
-from-scratch build. The concrete, scoped work still open:
+The `ssh-agent`/RAM-only secret handling from §5 is done, and §§1-4, 6, 8
+are confirming the existing pipeline still works (`docker ps`, a deploy +
+verify against Cluster A), not building something new. The real,
+still-open work is §7 - **the central DB connection doesn't exist yet,
+only the design does:**
 
-- Replace the file-based `SSH_PRIVATE_KEY` handling in `deploy.yml`/
-  `health.yml`/`sync_luis.yml` with the `ssh-agent`/RAM-only flow from §5
-- Test the SSH reverse tunnel from §7 against the Cluster A simulator
-  (§8) - a local test, no HPC access needed - and report whether it
-  actually works before Component 2 (WP3) builds on top of it
-- Everything else in §§1-4, 6, 8 is confirming the existing pipeline
-  still works (`docker ps`, a deploy + verify against Cluster A), not
-  building something new
+- Write the actual tunnel script (`ssh -R ...` plus reconnect/error
+  handling - the one-liner in §7 is the idea, not something you can run
+  as-is)
+- Decide on and set up persistence - a foreground `ssh -R` dies with your
+  terminal, and a job can outlive a short-lived connection by a lot; a
+  `systemd` unit or `autossh`, matching the runner's own persistent-service
+  approach from §4
+- Set up the central SQLite DB and turn on WAL journal mode
+- Test the whole thing against the Cluster A simulator (§8 - no HPC
+  access needed) and report whether it actually holds up before Component
+  2 (WP3) builds on top of it
 
-If WP1 has its own dedicated time/group, budget roughly 1-1.5h for the
-two items above; if it's mostly "already done," that time is better
-spent helping WP3 Component 2 validate the reverse tunnel live, since
-that's a shared dependency, not just a WP1 concern.
+That's a real 1-2h build for a small group, not a "confirm it still
+works" checkbox - treat it as WP1's main deliverable for the session.

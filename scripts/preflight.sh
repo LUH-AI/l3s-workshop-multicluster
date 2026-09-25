@@ -27,6 +27,8 @@ check "docker installed" command -v docker
 check "jq installed" command -v jq
 check "ssh installed" command -v ssh
 check "git installed" command -v git
+check "ssh-agent has a key loaded (ssh-add ~/workshop-keys/runner_key if not)" \
+  ssh-add -l
 
 echo
 echo "== Cluster reachability (config/clusters.json) =="
@@ -35,10 +37,9 @@ if [[ -f "$CLUSTERS_FILE" ]]; then
     HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CLUSTERS_FILE")
     PORT=$(jq -r ".\"$CLUSTER_NAME\".port // 22" "$CLUSTERS_FILE")
     USER_NAME=$(jq -r ".\"$CLUSTER_NAME\".user" "$CLUSTERS_FILE")
-    KEY=$(jq -r ".\"$CLUSTER_NAME\".key" "$CLUSTERS_FILE" | sed "s|~|$HOME|")
 
     check "$CLUSTER_NAME reachable (${USER_NAME}@${HOST}:${PORT})" \
-      ssh -p "$PORT" -i "$KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+      ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=5 \
           -o StrictHostKeyChecking=accept-new "${USER_NAME}@${HOST}" true
   done
 else

@@ -21,10 +21,9 @@ for CLUSTER_NAME in $(jq -r 'keys[]' "$CONFIG_FILE"); do
   HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CONFIG_FILE")
   PORT=$(jq -r ".\"$CLUSTER_NAME\".port // 22" "$CONFIG_FILE")
   USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
-  KEY=$(jq -r ".\"$CLUSTER_NAME\".key" "$CONFIG_FILE" | sed "s|~|$HOME|")
   TYPE=$(jq -r ".\"$CLUSTER_NAME\".type" "$CONFIG_FILE")
 
-  if ! ssh -p "$PORT" -i "$KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+  if ! ssh -p "$PORT" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
        "${USER}@${HOST}" "echo ok" &> /dev/null; then
     printf "%-12s %-15s %s\n" "$CLUSTER_NAME" "-" "UNREACHABLE ✗"
     OVERALL_STATUS=1
@@ -32,10 +31,10 @@ for CLUSTER_NAME in $(jq -r 'keys[]' "$CONFIG_FILE"); do
   fi
 
   if [[ "$TYPE" == "docker" ]]; then
-    RUNNING_TAG=$(ssh -p "$PORT" -i "$KEY" "${USER}@${HOST}" \
+    RUNNING_TAG=$(ssh -p "$PORT" "${USER}@${HOST}" \
       "docker images --format '{{.Repository}}:{{.Tag}}\t{{.CreatedAt}}' | grep '^${REGISTRY}:' | sort -k2 -r | head -1 | cut -f1 | cut -d: -f2" 2>/dev/null)
   elif [[ "$TYPE" == "apptainer" ]]; then
-    LATEST_SIF=$(ssh -p "$PORT" -i "$KEY" "${USER}@${HOST}" \
+    LATEST_SIF=$(ssh -p "$PORT" "${USER}@${HOST}" \
       "ls -t ~/project_*.sif 2>/dev/null | head -1" 2>/dev/null)
     RUNNING_TAG=$(echo "$LATEST_SIF" | sed -E 's/.*project_(.+)\.sif/\1/')
   else
