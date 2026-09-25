@@ -94,7 +94,8 @@ Each participant uses their **own** LUIS account — there is no shared setup.
 | Problem | Fix |
 |---|---|
 | Login node kills your process | Move it to `sbatch` — see `doc/wp3.md` Component 1 |
-| `apptainer pull` fails with auth error | Run `apptainer registry login --username <gh-user> --password-stdin docker://ghcr.io` first (same as `docker login` but for Apptainer) |
+| `apptainer pull` fails with `unauthorized` | Private package without credentials - `deploy.yml` passes `GHCR_USER`/`GHCR_TOKEN`; locally export both. `deploy.sh` hands the token to that one pull only and stores nothing on LUIS - don't run `apptainer registry login` there, it would save the token in `~/.apptainer` |
+| `Get "https://ghcr.io/v2/": EOF` / `SSL_ERROR_ZERO_RETURN` | LUIS only allows outbound HTTPS via `filter-proxy.rrzn.uni-hannover.de:3127`, set in `/etc/profile.d/proxy.sh`. `deploy.sh` loads `/etc/profile` for that; for manual `ssh luis '<cmd>'` calls use `bash -lc '<cmd>'` |
 | Disk quota exceeded | Use `/bigwork/<username>/` not `~` for `.sif` files and code |
 | `sync.yml` fails for one participant but not another | The `sync_path` in `clusters.json` must match each person's actual username — update your fork |
 
