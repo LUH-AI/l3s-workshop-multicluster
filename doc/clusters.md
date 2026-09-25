@@ -64,8 +64,11 @@ The login node is a shared gateway. It **kills long-running or resource-intensiv
 | `pixi install` | Anything using significant CPU/RAM/GPU |
 | Short smoke tests (`apptainer run project.sif echo ok`) | PyExperimenter workers |
 
-`cluster-config/luis-apptainer.sh` is designed to run on the login node —
-it only does `apptainer pull` + a quick `apptainer run`, so it's fine there.
+`deploy.sh luis <tag>` only runs `apptainer pull` on the login node, which is
+fine there; `deploy.sh luis <tag> --run` adds one quick `apptainer run` as a
+smoke test. There is no local simulator for Apptainer clusters (Apptainer
+needs real Linux user namespaces that don't nest well inside Docker) - test
+against the real login node.
 Any real workload needs an `sbatch` script (see `doc/wp3.md` Component 1 DoD).
 
 ### One-time setup per participant

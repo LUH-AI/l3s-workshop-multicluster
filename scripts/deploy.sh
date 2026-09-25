@@ -12,7 +12,19 @@ CLUSTER_NAME="${1:-}"
 IMAGE_TAG="${2:-}"
 RUN_AFTER_PULL=false
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
-REGISTRY="ghcr.io/evavormschlag/project"
+# Derived from the repo's origin remote (github.com/<owner>/<repo>), so a
+# fork pulls its own image without editing anything - the same owner the
+# workflows push to via github.repository_owner. GHCR needs it lowercase.
+# Set REGISTRY in the environment to override.
+if [[ -z "${REGISTRY:-}" ]]; then
+  ORIGIN_URL=$(git -C "$(dirname "$0")" remote get-url origin 2>/dev/null || true)
+  OWNER=$(sed -E 's#^(https://|git@)github\.com[:/]([^/]+)/.*#\2#' <<< "$ORIGIN_URL" | tr '[:upper:]' '[:lower:]')
+  if [[ -z "$OWNER" || "$OWNER" == "$ORIGIN_URL" ]]; then
+    echo "ERROR: can't derive the GHCR owner from git remote 'origin' ('$ORIGIN_URL') - set REGISTRY=ghcr.io/<owner>/project"
+    exit 1
+  fi
+  REGISTRY="ghcr.io/${OWNER}/project"
+fi
 
 if [[ -z "$CLUSTER_NAME" || -z "$IMAGE_TAG" ]]; then
   echo "Usage: ./deploy.sh <cluster-name> <image-tag> [--run]"
@@ -47,10 +59,12 @@ TYPE=$(jq -r ".\"$CLUSTER_NAME\".type" "$CONFIG_FILE")
 # cluster expects, not something these scripts read.
 
 # Optional: authenticate against a private GHCR package before pulling.
-# Only needed on a real, separate cluster - the local Docker simulators
-# share the host's docker.sock, so they inherit whatever `docker login` you
-# already did on your laptop. If GHCR_USER/GHCR_TOKEN aren't set (e.g. your
-# package is public), this is skipped entirely.
+# Needed on every cluster whose package is private - including the local
+# simulator: it shares the host's docker.sock, but registry credentials
+# live with the docker *client* (inside the container), so your laptop's
+# `docker login` does not carry over. The workflows pass GHCR_USER/
+# GHCR_TOKEN; locally, either export them or make the package public. If
+# they aren't set, this is skipped entirely.
 if [[ -n "${GHCR_TOKEN:-}" && -n "${GHCR_USER:-}" ]]; then
   echo "==> Logging in to ghcr.io on $CLUSTER_NAME as $GHCR_USER"
   if [[ "$TYPE" == "docker" ]]; then

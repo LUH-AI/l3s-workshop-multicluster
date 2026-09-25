@@ -22,7 +22,7 @@ installed, but running:
   ```
   Its private half becomes the `SSH_PRIVATE_KEY` GitHub secret (§5); its
   public half has to be installed on every target this pipeline deploys
-  to - the Cluster A simulator (`cluster-config/cluster-a-docker.sh`
+  to - the Cluster A simulator (`cluster-config/local-docker.sh`
   takes it as an argument) and every real cluster's `authorized_keys`.
 - **The self-hosted runner registered *and* running**, not just
   installed - registered against the repo under Settings -> Actions ->
@@ -196,10 +196,11 @@ system (LUIS et al.), not a second local simulator.
 
 ```bash
 ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""   # once
-./cluster-config/cluster-a-docker.sh ~/workshop-keys/runner_key.pub
+./cluster-config/local-docker.sh cluster-a ~/workshop-keys/runner_key.pub
 ```
 
-The script (via `cluster-config/local-docker.sh`) builds a small Debian
+The script reads port and user from the `cluster-a` entry in
+`config/clusters.json` and builds a small Debian
 image with `openssh-server` + the `docker` CLI + `rsync` (for
 `scripts/sync.sh`), creates a `clustera` OS
 user, installs the given public key into that user's `authorized_keys`,

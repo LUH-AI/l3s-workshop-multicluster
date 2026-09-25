@@ -36,8 +36,9 @@ config/clusters.json     central DB (WP1) +          historical runs from
 **What's realistic in 3-4h:** most of this only needs the local
 Cluster A simulator, not real HPC access.
 
-- Component 1: wire up KISSKI if the account is ready; Cluster A and
-  LUIS are already wired.
+- Component 1: wire up LUIS and KISSKI if the accounts are ready - only
+  Cluster A is in `config/clusters.json` so far; `doc/clusters.md` has
+  ready-to-use entries for the others.
 - Component 2: the worker loop and row-locking can be fully tested
   against Cluster A alone.
 - Component 3: run on **synthetic data** from the start - a real,
@@ -60,7 +61,7 @@ exists in `scripts/deploy.sh`, and `doc/clusters.md` has ready-to-use
 - Add a working KISSKI entry to `config/clusters.json`.
 - Make sure `scripts/preflight.sh` picks it up.
 - Add an `sbatch` job template so real workloads run as an actual SLURM
-  job, not on the login node (`cluster-config/luis-apptainer.sh` only
+  job, not on the login node (`deploy.sh <cluster> <tag> --run` only
   covers a login-node smoke test).
 
 ### Definition of Done

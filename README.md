@@ -86,9 +86,7 @@ multicluster-workshop/
 │   ├── preflight.sh           # local tooling + SSH reachability checks
 │   └── create-deployment-info.sh  # optional: commit/tag/timestamp JSON (not wired into CI)
 ├── cluster-config/
-│   ├── local-docker.sh        # generic local Docker "cluster" node (sshd + docker CLI)
-│   ├── cluster-a-docker.sh    # spin up Cluster A (port 2222, user clustera)
-│   └── luis-apptainer.sh      # test pull+run on a real LUIS login node
+│   └── local-docker.sh        # ./cluster-config/local-docker.sh <cluster-name> <pubkey> - local Docker simulator for any "type": "docker", localhost entry
 ├── doc/
 │   ├── wp1_proposed_solution.md
 │   ├── wp2_alternative_solutions.md
@@ -114,10 +112,14 @@ Desktop's WSL backend - run the scripts *and* the self-hosted runner inside
 WSL; PowerShell and Git Bash lack `rsync`/`jq`.
 
 1. Fork this repo, clone your fork.
-2. In `scripts/deploy.sh` and `scripts/verify.sh`, change
-   `REGISTRY="ghcr.io/<org>/project"` to your own GitHub username - skip
-   this and pushes fail with `permission_denied: create_package` (you'd be
-   creating a package under someone else's namespace).
+2. Nothing to edit for the image registry: the workflows push to
+   `ghcr.io/<your-username>/project`, and `scripts/deploy.sh` derives the
+   same owner from your fork's `origin` remote (override with
+   `REGISTRY=ghcr.io/<owner>/project` if needed). After the first push
+   (step 7's test run or any push to `main`), set the package to
+   **public** (GitHub -> your profile -> Packages -> project -> Package
+   settings) - otherwise running `deploy.sh` locally fails with
+   `unauthorized` (see "Secrets" below).
 3. Create a classic GitHub PAT with the **`write:packages`** scope (a
    fine-grained token does not reliably work with GHCR; `write:packages`
    already covers pulling too, so `read:packages` isn't needed
@@ -180,9 +182,11 @@ this file - keep cluster names, `key` and `type` in sync with whatever
 clusters' connection details and `doc/wp1_proposed_solution.md` §8 for how
 to set up and inspect the local Cluster A simulator.
 
-Build the local simulator with:
+Build the local simulator with (port, user and container name come from
+the `cluster-a` entry - any other `"type": "docker"` entry on `localhost`
+works the same way):
 ```
-./cluster-config/cluster-a-docker.sh ~/workshop-keys/runner_key.pub
+./cluster-config/local-docker.sh cluster-a ~/workshop-keys/runner_key.pub
 ```
 
 ### Adding the SSH key to Cluster A
@@ -235,16 +239,20 @@ fork), both consumed by the workflows, not committed anywhere:
 | `GHCR_TOKEN` | `docker login` when pushing the build in `deploy.yml`/`build.yml`; optionally reused by `deploy.sh` to log in on the *target* cluster before pulling | Always, for the push. For pulling: only if your GHCR package is **private** - the simplest alternative is making it public, then no pull-side auth is needed at all |
 | `SSH_PRIVATE_KEY` | loaded into an `ssh-agent` at the start of every job that needs SSH (deploy, verify, sync) - never written to disk, see `doc/wp1_proposed_solution.md` §5 | Required for CI. For local use, `ssh-add ~/workshop-keys/runner_key` once per shell session does the same job |
 
-The local Docker simulator (Cluster A) never needs pull-side auth: it
-shares the host's `docker.sock`, so it inherits whatever `docker login` you
-already ran on your laptop. A genuinely separate remote cluster (a real
-Cluster A, or LUIS/KISSKI/PC2) does need it if its package is private.
+Pull-side auth for a private package is needed on **every** cluster,
+including the local simulator: it shares the host's `docker.sock`, but
+registry credentials belong to the docker *client* inside the container,
+so your laptop's `docker login` does **not** carry over. The workflows
+handle this by passing `GHCR_USER`/`GHCR_TOKEN` to `deploy.sh`. Locally,
+either make the package public (recommended for the workshop) or run
+`GHCR_USER=<you> GHCR_TOKEN=<token> ./scripts/deploy.sh ...`.
 
 ## Known pitfalls
 
 | Problem | Fix |
 |---|---|
-| `permission_denied: create_package` on GHCR push | Wrong namespace - set `REGISTRY`/fork owner to your own username |
+| `permission_denied: create_package` on GHCR push | Wrong namespace - push from your own fork (the workflows use its owner) |
+| `unauthorized` when running `deploy.sh` locally | Package is private and the simulator has no GHCR login of its own - make the package public, or pass `GHCR_USER`/`GHCR_TOKEN` |
 | GHCR login fails with a fine-grained token | Use a classic PAT with `write:packages` (add `repo` only if your fork is private) |
 | `docker: permission denied ... docker.sock` in the simulator | GID mismatch between host socket and container group - `cluster-config/local-docker.sh` fixes this at container start |
 | YAML workflow: `No event triggers defined in on` | Usually a copy-paste formatting issue - rewrite with `cat > file << 'EOF' ... EOF` |

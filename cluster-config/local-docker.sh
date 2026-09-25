@@ -1,28 +1,42 @@
 #!/usr/bin/env bash
 # Prepares one local "cluster" node as a Docker container: sshd + docker CLI
 # talking to the host's Docker socket. This lets the runner SSH into a
-# container exactly like it would SSH into Cluster A, so the whole
+# container exactly like it would SSH into a real cluster, so the whole
 # pipeline can be tested end-to-end before real cluster access exists.
 #
-# Usage: ./local-docker.sh <container-name> <local-ssh-port> <ssh-user> <public-key-file> [restrict-command]
+# Usage: ./local-docker.sh <cluster-name> <public-key-file> [restrict-command]
 #
-# The container name, port and user must match the corresponding entry in
-# config/clusters.json (see cluster-a-docker.sh for the values already
-# wired up there).
+# Generic, like the scripts in scripts/: port and user come from the
+# cluster's entry in config/clusters.json (which must be "type": "docker"
+# on "host": "localhost"); the container is named after the cluster.
 #
 # Security note: mounting /var/run/docker.sock into the container gives
 # whoever can exec into it root-equivalent access to the host - this is the
 # same risk called out for real cluster runners in README.md. For this local
 # rig you can approximate the recommended `command=` restriction by passing
-# a 5th argument, e.g.:
-#   ./local-docker.sh cluster-a 2222 clustera ~/workshop-keys/runner_key.pub '/usr/local/bin/deploy-wrapper.sh'
+# a 3rd argument, e.g.:
+#   ./local-docker.sh cluster-a ~/workshop-keys/runner_key.pub '/usr/local/bin/deploy-wrapper.sh'
 set -euo pipefail
 
-NAME="${1:?container name required}"
-SSH_PORT="${2:?local SSH port required}"
-SSH_USER="${3:?ssh user required (must match config/clusters.json)}"
-PUBKEY_FILE="${4:?path to an SSH public key required}"
-RESTRICT_COMMAND="${5:-}"
+NAME="${1:?cluster name required (an entry in config/clusters.json)}"
+PUBKEY_FILE="${2:?path to an SSH public key required}"
+RESTRICT_COMMAND="${3:-}"
+CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
+
+command -v jq &> /dev/null || { echo "ERROR: jq is not installed (macOS: brew install jq, Debian/Ubuntu: sudo apt install jq)" >&2; exit 1; }
+
+if ! jq -e --arg c "$NAME" 'has($c)' "$CONFIG_FILE" &> /dev/null; then
+  echo "ERROR: cluster '$NAME' not found in $CONFIG_FILE" >&2
+  exit 1
+fi
+TYPE=$(jq -r --arg c "$NAME" '.[$c].type' "$CONFIG_FILE")
+HOST=$(jq -r --arg c "$NAME" '.[$c].host' "$CONFIG_FILE")
+SSH_PORT=$(jq -r --arg c "$NAME" '.[$c].port // 22' "$CONFIG_FILE")
+SSH_USER=$(jq -r --arg c "$NAME" '.[$c].user' "$CONFIG_FILE")
+if [[ "$TYPE" != "docker" || ( "$HOST" != "localhost" && "$HOST" != "127.0.0.1" ) ]]; then
+  echo "ERROR: '$NAME' is not a local simulator (needs \"type\": \"docker\" and host localhost, has type '$TYPE', host '$HOST')" >&2
+  exit 1
+fi
 
 [[ -f "$PUBKEY_FILE" ]] || { echo "ERROR: public key not found: $PUBKEY_FILE" >&2; exit 1; }
 

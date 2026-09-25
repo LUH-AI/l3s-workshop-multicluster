@@ -2,7 +2,6 @@
 set -uo pipefail
 
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
-REGISTRY="ghcr.io/evavormschlag/project"
 EXPECTED_TAG="${1:-$(git rev-parse --short HEAD)}"
 # Optional: check only this cluster instead of every entry in clusters.json.
 ONLY_CLUSTER="${2:-}"
