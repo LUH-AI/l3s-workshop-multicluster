@@ -15,21 +15,31 @@ command -v jq &> /dev/null || { echo "ERROR: jq is not installed"; exit 1; }
 
 sync_one() {
   local CLUSTER_NAME="$1"
-  local HOST USER REMOTE_PATH
+  local HOST PORT USER REMOTE_PATH
   HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CONFIG_FILE")
+  PORT=$(jq -r ".\"$CLUSTER_NAME\".port // 22" "$CONFIG_FILE")
   USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
   REMOTE_PATH=$(jq -r ".\"$CLUSTER_NAME\".sync_path" "$CONFIG_FILE")
 
-  echo "Syncing code to $CLUSTER_NAME ($USER@$HOST:$REMOTE_PATH) ..."
+  echo "Syncing code to $CLUSTER_NAME ($USER@$HOST:$PORT:$REMOTE_PATH) ..."
 
-  rsync -avz --delete \
-    -e "ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
+  # Explicit if/else, not just relying on `set -e`: this function runs
+  # under `sync_one ... || STATUS=1` in the multi-cluster loop below, and
+  # bash suspends -e for the whole function body in that context - without
+  # this check, a failed rsync would still fall through to the "success"
+  # echo and report a passing sync.
+  if rsync -avz --delete \
+    -e "ssh -p $PORT -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
     --exclude '.git' \
     --exclude '__pycache__' \
     "$(dirname "$0")/../" \
-    "${USER}@${HOST}:${REMOTE_PATH}/"
-
-  echo "✓ Sync to $CLUSTER_NAME complete"
+    "${USER}@${HOST}:${REMOTE_PATH}/"; then
+    echo "✓ Sync to $CLUSTER_NAME complete"
+    return 0
+  else
+    echo "✗ Sync to $CLUSTER_NAME failed" >&2
+    return 1
+  fi
 }
 
 if [[ $# -ge 1 ]]; then
