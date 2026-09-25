@@ -4,7 +4,7 @@ set -euo pipefail
 CLUSTER_NAME="${1:-}"
 IMAGE_TAG="${2:-}"
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
-REGISTRY="ghcr.io/<org>/project"
+REGISTRY="ghcr.io/evavormschlag/project"
 
 if [[ -z "$CLUSTER_NAME" || -z "$IMAGE_TAG" ]]; then
   echo "Usage: ./deploy.sh <cluster-name> <image-tag>"

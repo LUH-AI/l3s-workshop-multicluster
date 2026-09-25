@@ -2,7 +2,7 @@
 set -uo pipefail
 
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
-REGISTRY="ghcr.io/<org>/project"
+REGISTRY="ghcr.io/evavormschlag/project"
 EXPECTED_TAG="${1:-$(git rev-parse --short HEAD)}"
 
 if ! command -v jq &> /dev/null; then

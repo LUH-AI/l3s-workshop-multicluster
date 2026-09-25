@@ -8,7 +8,14 @@ Each cluster has an entry in `config/clusters.json` that `deploy.sh`,
 `verify.sh`, and `sync.sh` read at runtime. The sections below document the
 system-specific details behind those entries and the one-time setup each
 participant needs to do on their own account.
-
+,
+  "luis": {
+    "host": "login.cluster.uni-hannover.de",
+    "user": "<your-username>",
+    "key": "~/workshop-keys/runner_key",
+    "type": "apptainer",
+    "sync_path": "/bigwork/<your-username>/multicluster-workshop"
+  }
 ---
 
 ## LUIS (Leibniz Universität Hannover / L3S)
