@@ -1,0 +1,37 @@
+name: Sync source code
+
+# Config-driven, not hardcoded to one cluster: on every push, syncs the
+# repo to every cluster in config/clusters.json that defines a sync_path
+# (currently LUIS; KISSKI/PC2 pick this up automatically once they're
+# wired in). workflow_dispatch lets you target just one cluster instead.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      cluster:
+        description: 'Cluster name (leave empty to sync every cluster with a sync_path)'
+        required: false
+        type: string
+
+jobs:
+  sync:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up SSH agent
+        run: |
+          eval "$(ssh-agent -s)"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+
+      - name: Sync
+        run: ./scripts/sync.sh ${{ inputs.cluster }}
+
+      - name: Stop SSH agent
+        if: always()
+        run: ssh-agent -k

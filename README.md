@@ -75,7 +75,7 @@ multicluster-workshop/
 │   ├── build.yml            # pushes ghcr.io/<you>/project:dummy - a placeholder image, independent of a full deploy
 │   ├── deploy.yml            # workflow_dispatch: build + deploy to Cluster A
 │   ├── health.yml            # manual verify run (no deploy)
-│   ├── sync_luis.yml         # on push to main: rsync code to LUIS
+│   ├── sync.yml               # on push to main: rsync code to every cluster with a sync_path
 │   └── test_runner.yml       # minimal smoke test for your self-hosted runner
 ├── config/
 │   └── clusters.json         # cluster-name -> {host, port, user, key, type, ...}
