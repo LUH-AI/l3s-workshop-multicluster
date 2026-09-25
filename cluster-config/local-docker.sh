@@ -38,7 +38,7 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 cat > "$BUILD_DIR/Dockerfile" <<DOCKERFILE
 FROM debian:bookworm-slim
 RUN apt-get update \\
-    && apt-get install -y --no-install-recommends openssh-server docker.io \\
+    && apt-get install -y --no-install-recommends openssh-server docker.io rsync \\
     && rm -rf /var/lib/apt/lists/* \\
     && mkdir -p /var/run/sshd \\
     && useradd -m -s /bin/bash ${SSH_USER} \\

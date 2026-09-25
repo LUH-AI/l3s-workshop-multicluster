@@ -56,9 +56,12 @@ if [[ $# -ge 1 ]]; then
   sync_one "$CLUSTER_NAME"
 else
   CLUSTERS=$(jq -r 'to_entries[] | select(.value.sync_path != null) | .key' "$CONFIG_FILE")
+  # Not an error: a config with only Docker simulators (no sync_path) is
+  # valid, and the on-push workflow must not fail just because there is
+  # nothing to sync yet.
   if [[ -z "$CLUSTERS" ]]; then
-    echo "No clusters with a sync_path found in $CONFIG_FILE" >&2
-    exit 1
+    echo "No clusters with a sync_path found in $CONFIG_FILE - nothing to sync"
+    exit 0
   fi
   STATUS=0
   while IFS= read -r CLUSTER_NAME; do
