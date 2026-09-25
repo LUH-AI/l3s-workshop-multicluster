@@ -90,7 +90,7 @@ runtime, into RAM via `ssh-agent`** - never written to disk on the runner
 hardware, even temporarily.
 
 **Implemented.** Every workflow that needs SSH (`deploy.yml`, `health.yml`,
-`sync_luis.yml`) starts an agent and adds the key straight from the
+`sync.yml`) starts an agent and adds the key straight from the
 secret, without it ever touching a file:
 
 ```bash

@@ -13,7 +13,7 @@ participant needs to do on their own account.
 
 ## LUIS (Leibniz Universität Hannover / L3S)
 
-**Status:** primary HPC target for WP3 Component 1. Already wired into `config/clusters.json` and `sync_luis.yml`.
+**Status:** primary HPC target for WP3 Component 1. Already wired into `config/clusters.json` - `sync.yml` picks it up automatically via its `sync_path`.
 
 ### Connection
 
@@ -36,7 +36,8 @@ SSH command: `ssh <your-username>@login.cluster.uni-hannover.de`
 | `/bigwork/<username>/` | Working storage — use this for code and `.sif` images |
 | `~` (home dir) | Small quota — do not store large files here |
 
-`sync.sh` and `sync_luis.yml` both rsync to `/bigwork/<username>/multicluster-workshop/`,
+`sync.sh luis` (and `sync.yml`, which runs it for every configured
+cluster including this one) rsyncs to `/bigwork/<username>/multicluster-workshop/`,
 matching the `sync_path` in `clusters.json`. The `apptainer pull` in `deploy.sh`
 also lands the `.sif` file in the home directory by default — consider adjusting to
 `/bigwork/<username>/project_<tag>.sif` if you hit quota limits.
@@ -86,7 +87,7 @@ Each participant uses their **own** LUIS account — there is no shared setup.
 | Login node kills your process | Move it to `sbatch` — see `doc/wp3.md` Component 1 |
 | `apptainer pull` fails with auth error | Run `apptainer registry login --username <gh-user> --password-stdin docker://ghcr.io` first (same as `docker login` but for Apptainer) |
 | Disk quota exceeded | Use `/bigwork/<username>/` not `~` for `.sif` files and code |
-| `sync_luis.yml` fails for one participant but not another | The `sync_path` in `clusters.json` must match each person's actual username — update your fork |
+| `sync.yml` fails for one participant but not another | The `sync_path` in `clusters.json` must match each person's actual username — update your fork |
 
 ---
 
