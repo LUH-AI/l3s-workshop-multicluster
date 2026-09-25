@@ -48,7 +48,7 @@ if ! jq -e ".\"$CLUSTER_NAME\"" "$CONFIG_FILE" &> /dev/null; then
 fi
 
 HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CONFIG_FILE")
-PORT=$(jq -r ".\"$CLUSTER_NAME\".port" "$CONFIG_FILE")
+PORT=$(jq -r ".\"$CLUSTER_NAME\".port // 22" "$CONFIG_FILE")
 USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
 TYPE=$(jq -r ".\"$CLUSTER_NAME\".type" "$CONFIG_FILE")
 
