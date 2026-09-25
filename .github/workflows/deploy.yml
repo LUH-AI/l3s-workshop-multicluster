@@ -43,15 +43,19 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-      - name: Set up SSH key
+      - name: Set up SSH agent
         run: |
-          mkdir -p ~/workshop-keys
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/workshop-keys/runner_key
-          chmod 600 ~/workshop-keys/runner_key
+          eval "$(ssh-agent -s)"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
       - run: ./scripts/deploy.sh cluster-a ${{ needs.build.outputs.tag }}
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+      - name: Stop SSH agent
+        if: always()
+        run: ssh-agent -k
 
   verify:
     needs: [build, deploy-cluster-a]
@@ -59,12 +63,16 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-      - name: Set up SSH key
+      - name: Set up SSH agent
         run: |
-          mkdir -p ~/workshop-keys
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/workshop-keys/runner_key
-          chmod 600 ~/workshop-keys/runner_key
+          eval "$(ssh-agent -s)"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
       - run: ./scripts/verify.sh ${{ needs.build.outputs.tag }}
+      - name: Stop SSH agent
+        if: always()
+        run: ssh-agent -k
 
   summary:
     needs: [build, deploy-cluster-a, verify]

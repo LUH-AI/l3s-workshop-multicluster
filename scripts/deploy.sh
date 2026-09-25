@@ -24,8 +24,13 @@ fi
 HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CONFIG_FILE")
 PORT=$(jq -r ".\"$CLUSTER_NAME\".port" "$CONFIG_FILE")
 USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
-KEY=$(jq -r ".\"$CLUSTER_NAME\".key" "$CONFIG_FILE" | sed "s|~|$HOME|")
 TYPE=$(jq -r ".\"$CLUSTER_NAME\".type" "$CONFIG_FILE")
+
+# No -i <key> here on purpose: auth comes from whatever's loaded into a
+# running ssh-agent (ssh-add ~/workshop-keys/runner_key locally, or the
+# "Set up SSH agent" workflow step in CI). See doc/wp1_proposed_solution.md
+# §5. The "key" field in clusters.json is documentation of which key a
+# cluster expects, not something these scripts read.
 
 # Optional: authenticate against a private GHCR package before pulling.
 # Only needed on a real, separate cluster - the local Docker simulators
@@ -35,13 +40,13 @@ TYPE=$(jq -r ".\"$CLUSTER_NAME\".type" "$CONFIG_FILE")
 if [[ -n "${GHCR_TOKEN:-}" && -n "${GHCR_USER:-}" ]]; then
   echo "==> Logging in to ghcr.io on $CLUSTER_NAME as $GHCR_USER"
   if [[ "$TYPE" == "docker" ]]; then
-    ssh -p "$PORT" -i "$KEY" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+    ssh -p "$PORT" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
       "${USER}@${HOST}" "docker login ghcr.io -u '${GHCR_USER}' --password-stdin" <<<"$GHCR_TOKEN"
   elif [[ "$TYPE" == "apptainer" ]]; then
     # Apptainer's registry login is modeled after `docker login`; verify
     # --password-stdin is supported by the apptainer version on your target
     # if this fails.
-    ssh -p "$PORT" -i "$KEY" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+    ssh -p "$PORT" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
       "${USER}@${HOST}" "apptainer registry login --username '${GHCR_USER}' --password-stdin docker://ghcr.io" <<<"$GHCR_TOKEN"
   fi
 fi
@@ -57,7 +62,7 @@ else
   exit 1
 fi
 
-if ssh -p "$PORT" -i "$KEY" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+if ssh -p "$PORT" -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
    "${USER}@${HOST}" "$REMOTE_CMD"; then
   echo "✓ Deployment to $CLUSTER_NAME succeeded"
   exit 0

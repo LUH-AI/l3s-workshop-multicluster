@@ -25,7 +25,7 @@ config/clusters.json     central DB (WP1) +          historical runs from
 
 ## Prerequisites
 
-- WP0 done, and WP1's pipeline already working against Cluster A
+- Individual setup done, and WP1's pipeline already working against Cluster A
   (`deploy.sh`/`verify.sh`/`preflight.sh` succeed there).
 - A KISSKI account (Academic Cloud, public key uploaded at
   `id.academiccloud.de`, ~10 min propagation wait).

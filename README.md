@@ -29,17 +29,14 @@ tooling referenced in WP2).
 Each WP doc has its own "Definition of Done for this session" scoped to
 that budget (WP1 §9, WP2's final section, WP3's "Scoped for a 3-4h
 session") - short version: WP1 is mostly already built (two concrete
-gaps left, ~1-1.5h), WP2 is one hands-on comparison test (~30-45 min,
-not a rewrite), WP3 runs entirely against the Cluster A simulator and
-synthetic data, not real historical data or PC2 (that needs an
-already-approved project - not something arranged during the session).
-Do WP0 individual setup and confirm `deploy.sh`/`verify.sh` work against
-Cluster A **before** splitting into groups - everything else depends on
-that.
+gaps left), WP2 is one hands-on comparison test, and WP3 runs entirely
+against the Cluster A simulator and synthetic data, not real historical
+data or PC2 (that needs an already-approved project - not something
+arranged during the session). Do individual setup and confirm
+`deploy.sh`/`verify.sh` work against Cluster A **before** splitting into
+groups - everything else depends on that.
 
 **If the prototype at the end is the priority and time runs short:**
-WP2 is the one piece that doesn't feed it - it's a comparison writeup,
-not something WP3 depends on - so it's the first thing to shrink or cut.
 WP3 doesn't need to wait on WP1 either: Component 2 has a local-sync
 default for getting results into the central DB (see `doc/wp3.md`
 Component 2) so it isn't blocked if WP1's live SSH tunnel isn't ready in
@@ -50,7 +47,7 @@ time - that tunnel is a nice-to-have upgrade, not a dependency.
 This repo is public. There's no shared infrastructure for individual
 development: each contributor **forks** it, runs their **own**
 self-hosted GitHub Actions runner, and pushes to their **own** GHCR
-namespace - see WP0 below. `doc/wp1_proposed_solution.md` §4 describes
+namespace - see Individual setup below. `doc/wp1_proposed_solution.md` §4 describes
 the target production setup (one runner, permanently on dedicated
 hardware) - that's the deployment target this pipeline is designed for,
 distinct from each contributor's own fork used for development.
@@ -105,29 +102,44 @@ multicluster-workshop/
 └── Dockerfile
 ```
 
-## WP0: individual setup
+## Individual setup
 
 Do this before anything else - none of the scripts or workflows below can
-be tested without it. See `doc/wp1_proposed_solution.md` §0 for the short
-version of what must be true; this is the step-by-step.
+be tested without it. You'll need Docker installed locally.
 
-1. Fork this repo, clone your fork
+1. Fork this repo, clone your fork.
 2. In `scripts/deploy.sh` and `scripts/verify.sh`, change
    `REGISTRY="ghcr.io/<org>/project"` to your own GitHub username - skip
    this and pushes fail with `permission_denied: create_package` (you'd be
-   creating a package under someone else's namespace)
-3. Create a classic GitHub PAT with `write:packages` + `repo` scopes (a
-   fine-grained token does not reliably work with GHCR) and store it as the
-   `GHCR_TOKEN` secret in your fork's repo settings (Settings -> Secrets and
-   variables -> Actions)
-4. Generate a dedicated SSH key: `ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""` -
-   store its **private** key content as the `SSH_PRIVATE_KEY` secret too (every
-   workflow writes it to `~/workshop-keys/runner_key` at the start of each
-   run, so this works even on a freshly set up runner - see
-   `doc/wp1_proposed_solution.md` §5 for why that's a temporary state, not
-   the target design)
-5. Register a self-hosted runner in your fork (Settings -> Actions ->
-   Runners) and keep it running (`./run.sh`, or install it as a service)
+   creating a package under someone else's namespace).
+3. Create a classic GitHub PAT with the **`write:packages`** scope (a
+   fine-grained token does not reliably work with GHCR; `write:packages`
+   already covers pulling too, so `read:packages` isn't needed
+   separately). 
+4. Generate a dedicated SSH key:
+   ```bash
+   ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""
+   ```
+5. Store both as repo secrets. In your fork on GitHub: **Settings ->
+   Secrets and variables -> Actions -> New repository secret**:
+   - `GHCR_TOKEN` - the PAT from step 3
+   - `SSH_PRIVATE_KEY` - the private key content, from `cat ~/workshop-keys/runner_key`
+
+   Every workflow loads this straight into an `ssh-agent` at the start of
+   the run (see `doc/wp1_proposed_solution.md` §5) - it never touches disk
+   in CI. Running the scripts **locally** (outside a workflow) needs the
+   same thing done by hand once per shell session:
+   ```bash
+   ssh-add ~/workshop-keys/runner_key
+   ```
+   `scripts/preflight.sh` checks for this and tells you if nothing's
+   loaded.
+6. Register a self-hosted runner in your fork (Settings -> Actions ->
+   Runners -> New self-hosted runner) and run the setup commands GitHub
+   shows you there. Keep it running (`./run.sh`).
+7. Once a cluster simulator exists, the runner's **public** key needs to
+   be in that container's `~/.ssh/authorized_keys` too - see "Adding the
+   SSH key to Cluster A" under "Cluster config" below.
 
 **Definition of Done:** `docker ps` works, `docker login ghcr.io` with your
 token works, a test push to `ghcr.io/<you>/project:test` works, the runner
@@ -156,6 +168,19 @@ Build the local simulator with:
 ./cluster-config/cluster-a-docker.sh ~/workshop-keys/runner_key.pub
 ```
 
+### Adding the SSH key to Cluster A
+
+The `<public-key-file>` argument above **is** how the key gets in - the
+script installs it into the container's `~/.ssh/authorized_keys` at
+creation time, so this is normally a one-time thing per container.
+
+If the container already exists and you need to add or refresh a key
+without rebuilding it (e.g. you generated a new key after already
+building the container):
+```bash
+cat ~/workshop-keys/runner_key.pub | docker exec -i cluster-a sh -c 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys'
+```
+
 ## Placeholder image
 
 `.github/workflows/build.yml` builds and pushes an image independently of
@@ -182,7 +207,7 @@ fork), both consumed by the workflows, not committed anywhere:
 | Secret | Used for | Required? |
 |---|---|---|
 | `GHCR_TOKEN` | `docker login` when pushing the build in `deploy.yml`/`build.yml`; optionally reused by `deploy.sh` to log in on the *target* cluster before pulling | Always, for the push. For pulling: only if your GHCR package is **private** - the simplest alternative is making it public, then no pull-side auth is needed at all |
-| `SSH_PRIVATE_KEY` | written to `~/workshop-keys/runner_key` at the start of every job that needs SSH (deploy, verify, sync) | Recommended, so the workflow doesn't depend on that file already existing on whatever machine runs your runner. `doc/wp1_proposed_solution.md` §5 describes the target design (RAM-only via `ssh-agent`, never written to disk) - not yet implemented |
+| `SSH_PRIVATE_KEY` | loaded into an `ssh-agent` at the start of every job that needs SSH (deploy, verify, sync) - never written to disk, see `doc/wp1_proposed_solution.md` §5 | Required for CI. For local use, `ssh-add ~/workshop-keys/runner_key` once per shell session does the same job |
 
 The local Docker simulator (Cluster A) never needs pull-side auth: it
 shares the host's `docker.sock`, so it inherits whatever `docker login` you
@@ -194,7 +219,7 @@ Cluster A, or LUIS/KISSKI/PC2) does need it if its package is private.
 | Problem | Fix |
 |---|---|
 | `permission_denied: create_package` on GHCR push | Wrong namespace - set `REGISTRY`/fork owner to your own username |
-| GHCR login fails with a fine-grained token | Use a classic PAT with `write:packages` + `repo` |
+| GHCR login fails with a fine-grained token | Use a classic PAT with `write:packages` (add `repo` only if your fork is private) |
 | `docker: permission denied ... docker.sock` in the simulator | GID mismatch between host socket and container group - `cluster-config/local-docker.sh` fixes this at container start |
 | YAML workflow: `No event triggers defined in on` | Usually a copy-paste formatting issue - rewrite with `cat > file << 'EOF' ... EOF` |
 | SSH key auth doesn't work | Check permissions: `chmod 700 ~/.ssh`, `chmod 600 ~/.ssh/authorized_keys` |
