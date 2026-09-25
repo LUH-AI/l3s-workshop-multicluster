@@ -52,7 +52,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Config-driven, like sync.yml: reads the cluster list from
-  # config/clusters.json, so a new entry there is picked up automatically.
+  # config/clusters.json, so a new entry there is picked up automatically -
+  # but only "type": "docker" clusters. HPC (apptainer) clusters are never
+  # pulled on push: a multi-minute `apptainer pull` on a shared login node
+  # per push is too heavy, and it would replace the .sif a running
+  # experiment series depends on. Deploy those deliberately via deploy.yml.
   clusters:
     if: ${{ github.event_name == 'push' }}
     runs-on: self-hosted
@@ -61,15 +65,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: list
-        run: echo "names=$(jq -c 'keys' config/clusters.json)" >> "$GITHUB_OUTPUT"
+        run: echo "names=$(jq -c '[to_entries[] | select(.value.type == "docker") | .key]' config/clusters.json)" >> "$GITHUB_OUTPUT"
 
-  # Pull-only deploy of the freshly pushed image to every cluster (deploy.sh
-  # without --run), so each one has the latest commit ready. Nothing is
-  # started - on HPC targets experiments go through sbatch. One job per
-  # cluster, fail-fast off, so one unreachable cluster doesn't cancel the
-  # others.
+  # Pull-only deploy of the freshly pushed image to every docker cluster
+  # (deploy.sh without --run), so each one has the latest commit ready.
+  # One job per cluster, fail-fast off, so one unreachable cluster doesn't
+  # cancel the others. Skipped when there are no docker clusters (an empty
+  # matrix is an error in Actions).
   pull:
     needs: [build, clusters]
+    if: ${{ needs.clusters.outputs.names != '[]' }}
     runs-on: self-hosted
     strategy:
       fail-fast: false
@@ -92,11 +97,12 @@ jobs:
         if: always()
         run: ssh-agent -k
 
-  # verify.sh already loops over every cluster itself - runs once after all
-  # pulls, also when some of them failed, so the table shows which ones.
+  # Checks exactly the clusters that were pulled to (not HPC ones, which
+  # would otherwise show up as OUTDATED on every push). Runs also when some
+  # pulls failed, so the output shows which ones.
   verify:
-    needs: [build, pull]
-    if: ${{ always() && needs.build.result == 'success' && github.event_name == 'push' }}
+    needs: [build, clusters, pull]
+    if: ${{ always() && needs.build.result == 'success' && github.event_name == 'push' && needs.clusters.outputs.names != '[]' }}
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -106,7 +112,14 @@ jobs:
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
           echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-      - run: ./scripts/verify.sh ${{ needs.build.outputs.tag }}
+      - env:
+          NAMES: ${{ needs.clusters.outputs.names }}
+        run: |
+          STATUS=0
+          for CLUSTER in $(jq -r '.[]' <<< "$NAMES"); do
+            ./scripts/verify.sh ${{ needs.build.outputs.tag }} "$CLUSTER" || STATUS=1
+          done
+          exit $STATUS
       - name: Stop SSH agent
         if: always()
         run: ssh-agent -k

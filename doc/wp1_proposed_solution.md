@@ -248,9 +248,11 @@ container are actually stored in the **host machine's own Docker Engine**
 the Docker Desktop VM's disk on macOS), exactly as if you'd run
 `docker pull`/`docker run` on the host directly. `--rm` removes the
 *container* the moment `hello.py` exits, so nothing running persists
-either way - what actually persists, and what `verify.sh` inspects, is
-the **pulled image** sitting in that shared image cache (`docker images`,
-newest tag matching the registry prefix).
+either way - what actually persists is the **pulled image** sitting in
+that shared image cache (`docker images`). `verify.sh` doesn't guess from
+that cache, though (image timestamps are unreliable, and the runner's own
+builds land there too): `deploy.sh` writes the tag to `~/.deployed_tag`
+on the cluster after each successful pull, and `verify.sh` reads that.
 
 Worth keeping in mind precisely because it's a shared socket: Cluster A's
 simulator doesn't have its own isolated Docker state - `docker images`/

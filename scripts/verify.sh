@@ -42,15 +42,15 @@ for CLUSTER_NAME in $CLUSTERS; do
     continue
   fi
 
-  if [[ "$TYPE" == "docker" ]]; then
-    RUNNING_TAG=$(ssh -p "$PORT" "${USER}@${HOST}" \
-      "docker images --format '{{.Repository}}:{{.Tag}}\t{{.CreatedAt}}' | grep '^${REGISTRY}:' | sort -k2 -r | head -1 | cut -f1 | cut -d: -f2" 2>/dev/null)
-  elif [[ "$TYPE" == "apptainer" ]]; then
+  # Written by deploy.sh after each successful pull (see MARK_DEPLOYED there).
+  RUNNING_TAG=$(ssh -p "$PORT" "${USER}@${HOST}" "cat ~/.deployed_tag 2>/dev/null" 2>/dev/null)
+
+  # Fallback for apptainer clusters deployed before the marker existed: the
+  # tag is part of the .sif filename.
+  if [[ -z "$RUNNING_TAG" && "$TYPE" == "apptainer" ]]; then
     LATEST_SIF=$(ssh -p "$PORT" "${USER}@${HOST}" \
       "ls -t ~/project_*.sif 2>/dev/null | head -1" 2>/dev/null)
     RUNNING_TAG=$(echo "$LATEST_SIF" | sed -E 's/.*project_(.+)\.sif/\1/')
-  else
-    RUNNING_TAG=""
   fi
 
   if [[ -z "$RUNNING_TAG" ]]; then

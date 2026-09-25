@@ -72,7 +72,7 @@ Target clusters
 ```
 multicluster-workshop/
 ├── .github/workflows/
-│   ├── build.yml            # on push to main: pushes ghcr.io/<you>/project:<sha> + :dummy, then pull-only deploy to every cluster in clusters.json
+│   ├── build.yml            # on push to main: pushes ghcr.io/<you>/project:<sha> + :dummy, then pull-only deploy to every docker cluster in clusters.json
 │   ├── deploy.yml            # workflow_dispatch: build + deploy to one cluster or all in clusters.json
 │   ├── health.yml            # manual verify run (no deploy)
 │   ├── sync.yml               # on push to main: rsync code to every cluster with a sync_path
@@ -210,10 +210,13 @@ ghcr.io/<you>/project:dummy
 ```
 
 On a push (not a manual run) it then also pulls that `<sha>` image onto
-**every cluster in `config/clusters.json`** - one job per cluster,
-`deploy.sh` without `--run`, followed by one `verify.sh` - so each
-cluster always has the latest commit ready. Nothing is started; on HPC
-targets experiments go through `sbatch`.
+**every `"type": "docker"` cluster in `config/clusters.json`** - one job
+per cluster, `deploy.sh` without `--run`, followed by `verify.sh` for
+those clusters - so e.g. Cluster A always has the latest commit ready.
+Nothing is started. HPC (`apptainer`) clusters are deliberately left
+out: an `apptainer pull` on a shared login node per push is too heavy,
+and it would replace the `.sif` a running experiment series uses -
+deploy those manually via `deploy.yml`.
 
 Useful whenever you need *something* in GHCR to point `deploy.sh`/
 `verify.sh` at without waiting on a full `deploy.yml` run. Reuses the same

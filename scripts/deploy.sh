@@ -71,8 +71,14 @@ else
   echo "Deploying $REGISTRY:$IMAGE_TAG to $CLUSTER_NAME ($TYPE) at $HOST:$PORT (pull only) ..."
 fi
 
+# Records which tag was deployed, only after a successful pull. This is
+# what verify.sh reads - image timestamps are no reliable signal (builds
+# from cache share one CreatedAt), and on the simulator the shared host
+# Docker also holds images the runner built itself.
+MARK_DEPLOYED="echo '${IMAGE_TAG}' > ~/.deployed_tag"
+
 if [[ "$TYPE" == "docker" ]]; then
-  REMOTE_CMD="docker pull ${REGISTRY}:${IMAGE_TAG}"
+  REMOTE_CMD="docker pull ${REGISTRY}:${IMAGE_TAG} && ${MARK_DEPLOYED}"
   [[ "$RUN_AFTER_PULL" == true ]] && REMOTE_CMD+=" && docker run --rm ${REGISTRY}:${IMAGE_TAG}"
 elif [[ "$TYPE" == "apptainer" ]]; then
   # Only after a successful pull, drop every other project_*.sif so the
@@ -80,6 +86,7 @@ elif [[ "$TYPE" == "apptainer" ]]; then
   # exactly the current one (verify.sh reads the tag from its filename).
   REMOTE_CMD="apptainer pull --force project_${IMAGE_TAG}.sif docker://${REGISTRY}:${IMAGE_TAG}"
   REMOTE_CMD+=" && find . -maxdepth 1 -name 'project_*.sif' ! -name 'project_${IMAGE_TAG}.sif' -print -delete"
+  REMOTE_CMD+=" && ${MARK_DEPLOYED}"
   [[ "$RUN_AFTER_PULL" == true ]] && REMOTE_CMD+=" && apptainer run project_${IMAGE_TAG}.sif"
 else
   echo "ERROR: unknown type '$TYPE' for cluster '$CLUSTER_NAME'"
