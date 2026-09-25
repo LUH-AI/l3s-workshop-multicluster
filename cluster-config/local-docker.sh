@@ -77,5 +77,11 @@ else
   docker exec "$NAME" usermod -aG dockerhost "$SSH_USER"
 fi
 
+# Every rebuild generates fresh sshd host keys, so any known_hosts entry
+# from a previous container on this port is now stale and would make the
+# next ssh/rsync fail with "REMOTE HOST IDENTIFICATION HAS CHANGED".
+ssh-keygen -R "[localhost]:${SSH_PORT}" >/dev/null 2>&1 || true
+ssh-keygen -R "[127.0.0.1]:${SSH_PORT}" >/dev/null 2>&1 || true
+
 echo "==> ${NAME} listening on 127.0.0.1:${SSH_PORT}, user '${SSH_USER}'"
 echo "    test with: ssh -p ${SSH_PORT} ${SSH_USER}@127.0.0.1"
