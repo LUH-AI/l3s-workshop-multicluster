@@ -1,10 +1,10 @@
 name: Build placeholder container
 
 # Builds and pushes an image ahead of/independent from the full deploy
-# workflow, so groups that don't own WP2 (Containers) - i.e. WP1, WP3, WP4 -
-# have something real in GHCR to point deploy.sh/verify.sh at before WP2 is
-# actually done. Pushes two tags: the Git SHA (traceable) and a stable
-# `dummy` tag (so you don't need to know/look up a SHA to use it).
+# workflow, so there's always something real in GHCR to point
+# deploy.sh/verify.sh at, even before anyone has touched the real
+# Dockerfile content. Pushes two tags: the Git SHA (traceable) and a
+# stable `dummy` tag (so you don't need to know/look up a SHA to use it).
 #
 # Trigger it once manually (Actions -> Build placeholder container -> Run
 # workflow) to seed GHCR before group work starts. It also runs on every
