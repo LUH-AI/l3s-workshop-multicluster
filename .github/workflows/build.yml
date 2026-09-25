@@ -28,19 +28,27 @@ jobs:
         id: vars
         run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Build image
+      # Multi-arch image: amd64 for the HPC clusters (LUIS etc.), arm64 for
+      # a simulator on an Apple Silicon runner - otherwise the image only
+      # has the runner's own architecture, and `apptainer pull` on LUIS
+      # fails with "no image found in image index for architecture amd64".
+      # QEMU + a buildx builder make this work on any runner (Docker Desktop
+      # or a plain Linux Docker engine).
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and push image
         run: |
-          docker build \
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
             --build-arg GIT_SHA=${{ steps.vars.outputs.tag }} \
             -t ghcr.io/${{ github.repository_owner }}/project:${{ steps.vars.outputs.tag }} \
             -t ghcr.io/${{ github.repository_owner }}/project:dummy \
+            --push \
             .
-
-      - name: Push image
-        run: |
-          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker push ghcr.io/${{ github.repository_owner }}/project:${{ steps.vars.outputs.tag }}
-          docker push ghcr.io/${{ github.repository_owner }}/project:dummy
 
       - name: Summary
         run: |
