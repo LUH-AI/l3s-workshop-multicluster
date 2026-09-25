@@ -9,11 +9,15 @@ Each cluster has an entry in `config/clusters.json` that `deploy.sh`,
 system-specific details behind those entries and the one-time setup each
 participant needs to do on their own account.
 
+None of these clusters is in the committed `config/clusters.json` (it only
+contains the `cluster-a` simulator) - each participant adds the entries
+for the clusters they have access to in their own fork.
+
 ---
 
 ## LUIS (Leibniz Universität Hannover / L3S)
 
-**Status:** primary HPC target for WP3 Component 1. Already wired into `config/clusters.json` - `sync.yml` picks it up automatically via its `sync_path`.
+**Status:** primary HPC target for WP3 Component 1. Not yet in `config/clusters.json` — add the entry below (with your username) to wire it in; `sync.yml` then picks it up automatically via its `sync_path`.
 
 ### Connection
 
@@ -36,11 +40,13 @@ SSH command: `ssh <your-username>@login.cluster.uni-hannover.de`
 | `/bigwork/<username>/` | Working storage — use this for code and `.sif` images |
 | `~` (home dir) | Small quota — do not store large files here |
 
-`sync.sh luis` (and `sync.yml`, which runs it for every configured
-cluster including this one) rsyncs to `/bigwork/<username>/multicluster-workshop/`,
+`sync.sh luis` (and `sync.yml`, which runs it for every cluster with a
+`sync_path`, so this one too once it's added) rsyncs to `/bigwork/<username>/multicluster-workshop/`,
 matching the `sync_path` in `clusters.json`. The `apptainer pull` in `deploy.sh`
-also lands the `.sif` file in the home directory by default — consider adjusting to
-`/bigwork/<username>/project_<tag>.sif` if you hit quota limits.
+also lands the `.sif` file in the home directory by default. Only the current one is
+kept (older `project_*.sif` files are deleted after each successful pull), but a single
+image can still be large — consider adjusting to `/bigwork/<username>/project_<tag>.sif`
+if you hit quota limits.
 
 ### Environment and container runtime
 
@@ -58,8 +64,11 @@ The login node is a shared gateway. It **kills long-running or resource-intensiv
 | `pixi install` | Anything using significant CPU/RAM/GPU |
 | Short smoke tests (`apptainer run project.sif echo ok`) | PyExperimenter workers |
 
-`cluster-config/luis-apptainer.sh` is designed to run on the login node —
-it only does `apptainer pull` + a quick `apptainer run`, so it's fine there.
+`deploy.sh luis <tag>` only runs `apptainer pull` on the login node, which is
+fine there; `deploy.sh luis <tag> --run` adds one quick `apptainer run` as a
+smoke test. There is no local simulator for Apptainer clusters (Apptainer
+needs real Linux user namespaces that don't nest well inside Docker) - test
+against the real login node.
 Any real workload needs an `sbatch` script (see `doc/wp3.md` Component 1 DoD).
 
 ### One-time setup per participant
@@ -76,8 +85,8 @@ Each participant uses their **own** LUIS account — there is no shared setup.
    ```
    Or manually append the contents of `~/workshop-keys/runner_key.pub` to
    `~/.ssh/authorized_keys` on LUIS.
-3. Update `config/clusters.json` in your fork — replace both `<your-username>`
-   placeholders in the `luis` entry.
+3. Add the `luis` entry from "Connection" above to `config/clusters.json`
+   in your fork, replacing both `<your-username>` placeholders.
 4. Test that `scripts/sync.sh luis` completes without errors.
 
 ### Known pitfalls

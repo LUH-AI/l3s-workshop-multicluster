@@ -2,12 +2,23 @@
 set -uo pipefail
 
 CONFIG_FILE="$(dirname "$0")/../config/clusters.json"
-REGISTRY="ghcr.io/<org>/project"
 EXPECTED_TAG="${1:-$(git rev-parse --short HEAD)}"
+# Optional: check only this cluster instead of every entry in clusters.json.
+ONLY_CLUSTER="${2:-}"
 
 if ! command -v jq &> /dev/null; then
-  echo "ERROR: jq is not installed (brew install jq)"
+  echo "ERROR: jq is not installed (macOS: brew install jq, Debian/Ubuntu: sudo apt install jq)"
   exit 1
+fi
+
+if [[ -n "$ONLY_CLUSTER" ]]; then
+  if ! jq -e --arg c "$ONLY_CLUSTER" 'has($c)' "$CONFIG_FILE" &> /dev/null; then
+    echo "ERROR: cluster '$ONLY_CLUSTER' not found in $CONFIG_FILE"
+    exit 1
+  fi
+  CLUSTERS="$ONLY_CLUSTER"
+else
+  CLUSTERS=$(jq -r 'keys[]' "$CONFIG_FILE")
 fi
 
 echo "Expected tag (current git commit): $EXPECTED_TAG"
@@ -17,7 +28,7 @@ printf "%-12s %-15s %s\n" "-------" "-------------" "------"
 
 OVERALL_STATUS=0
 
-for CLUSTER_NAME in $(jq -r 'keys[]' "$CONFIG_FILE"); do
+for CLUSTER_NAME in $CLUSTERS; do
   HOST=$(jq -r ".\"$CLUSTER_NAME\".host" "$CONFIG_FILE")
   PORT=$(jq -r ".\"$CLUSTER_NAME\".port // 22" "$CONFIG_FILE")
   USER=$(jq -r ".\"$CLUSTER_NAME\".user" "$CONFIG_FILE")
@@ -30,15 +41,15 @@ for CLUSTER_NAME in $(jq -r 'keys[]' "$CONFIG_FILE"); do
     continue
   fi
 
-  if [[ "$TYPE" == "docker" ]]; then
-    RUNNING_TAG=$(ssh -p "$PORT" "${USER}@${HOST}" \
-      "docker images --format '{{.Repository}}:{{.Tag}}\t{{.CreatedAt}}' | grep '^${REGISTRY}:' | sort -k2 -r | head -1 | cut -f1 | cut -d: -f2" 2>/dev/null)
-  elif [[ "$TYPE" == "apptainer" ]]; then
+  # Written by deploy.sh after each successful pull (see MARK_DEPLOYED there).
+  RUNNING_TAG=$(ssh -p "$PORT" "${USER}@${HOST}" "cat ~/.deployed_tag 2>/dev/null" 2>/dev/null)
+
+  # Fallback for apptainer clusters deployed before the marker existed: the
+  # tag is part of the .sif filename.
+  if [[ -z "$RUNNING_TAG" && "$TYPE" == "apptainer" ]]; then
     LATEST_SIF=$(ssh -p "$PORT" "${USER}@${HOST}" \
       "ls -t ~/project_*.sif 2>/dev/null | head -1" 2>/dev/null)
     RUNNING_TAG=$(echo "$LATEST_SIF" | sed -E 's/.*project_(.+)\.sif/\1/')
-  else
-    RUNNING_TAG=""
   fi
 
   if [[ -z "$RUNNING_TAG" ]]; then

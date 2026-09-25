@@ -72,23 +72,21 @@ Target clusters
 ```
 multicluster-workshop/
 ├── .github/workflows/
-│   ├── build.yml            # pushes ghcr.io/<you>/project:dummy - a placeholder image, independent of a full deploy
-│   ├── deploy.yml            # workflow_dispatch: build + deploy to Cluster A
+│   ├── build.yml            # on push to main: pushes ghcr.io/<you>/project:<sha> + :dummy, then pull-only deploy to every docker cluster in clusters.json
+│   ├── deploy.yml            # workflow_dispatch: build + deploy to one cluster or all in clusters.json
 │   ├── health.yml            # manual verify run (no deploy)
 │   ├── sync.yml               # on push to main: rsync code to every cluster with a sync_path
 │   └── test_runner.yml       # minimal smoke test for your self-hosted runner
 ├── config/
 │   └── clusters.json         # cluster-name -> {host, port, user, key, type, ...}
 ├── scripts/
-│   ├── deploy.sh             # ./scripts/deploy.sh <cluster-name> <image-tag>
-│   ├── verify.sh             # ./scripts/verify.sh [tag] - expected vs. actual per cluster
-│   ├── sync.sh                # ./scripts/sync.sh <cluster-name> - rsync source (default: luis)
+│   ├── deploy.sh             # ./scripts/deploy.sh <cluster-name> <image-tag> [--run] - pull only unless --run
+│   ├── verify.sh             # ./scripts/verify.sh [tag] [cluster] - expected vs. actual per cluster (default: all)
+│   ├── sync.sh                # ./scripts/sync.sh [cluster-name] - rsync source (default: every cluster with a sync_path)
 │   ├── preflight.sh           # local tooling + SSH reachability checks
 │   └── create-deployment-info.sh  # optional: commit/tag/timestamp JSON (not wired into CI)
 ├── cluster-config/
-│   ├── local-docker.sh        # generic local Docker "cluster" node (sshd + docker CLI)
-│   ├── cluster-a-docker.sh    # spin up Cluster A (port 2222, user clustera)
-│   └── luis-apptainer.sh      # test pull+run on a real LUIS login node
+│   └── local-docker.sh        # ./cluster-config/local-docker.sh <cluster-name> <pubkey> - local Docker simulator for any "type": "docker", localhost entry
 ├── doc/
 │   ├── wp1_proposed_solution.md
 │   ├── wp2_alternative_solutions.md
@@ -107,11 +105,21 @@ multicluster-workshop/
 Do this before anything else - none of the scripts or workflows below can
 be tested without it. You'll need Docker installed locally.
 
+**Supported platforms:** macOS and Linux. The scripts need `bash`, `jq`,
+`rsync`, `ssh` and `docker` (macOS: `brew install jq`; Debian/Ubuntu:
+`sudo apt install jq rsync`). Windows works only via **WSL2** with Docker
+Desktop's WSL backend - run the scripts *and* the self-hosted runner inside
+WSL; PowerShell and Git Bash lack `rsync`/`jq`.
+
 1. Fork this repo, clone your fork.
-2. In `scripts/deploy.sh` and `scripts/verify.sh`, change
-   `REGISTRY="ghcr.io/<org>/project"` to your own GitHub username - skip
-   this and pushes fail with `permission_denied: create_package` (you'd be
-   creating a package under someone else's namespace).
+2. Nothing to edit for the image registry: the workflows push to
+   `ghcr.io/<your-username>/project`, and `scripts/deploy.sh` derives the
+   same owner from your fork's `origin` remote (override with
+   `REGISTRY=ghcr.io/<owner>/project` if needed). After the first push
+   (step 7's test run or any push to `main`), set the package to
+   **public** (GitHub -> your profile -> Packages -> project -> Package
+   settings) - otherwise running `deploy.sh` locally fails with
+   `unauthorized` (see "Secrets" below).
 3. Create a classic GitHub PAT with the **`write:packages`** scope (a
    fine-grained token does not reliably work with GHCR; `write:packages`
    already covers pulling too, so `read:packages` isn't needed
@@ -151,21 +159,34 @@ One entry per cluster, keyed by name:
 
 ```json
 {
-  "cluster-a": { "host": "localhost", "port": 2222, "user": "clustera", "key": "~/workshop-keys/runner_key", "type": "docker" }
+  "cluster-a": { "host": "localhost", "port": 2222, "user": "clustera", "key": "~/workshop-keys/runner_key", "type": "docker", "sync_path": "/home/clustera/workshop" }
 }
 ```
 
-`type` is `docker` (Cluster A, deployed via `docker pull && docker run`)
-or `apptainer` (LUIS/KISSKI/PC2, deployed as `apptainer pull` into
-`project_<tag>.sif` + `apptainer run`). `deploy.sh`/`verify.sh` both read
+`sync_path` is optional: only clusters that have one are targeted by
+`scripts/sync.sh`/`sync.yml`. Cluster A doesn't strictly need it (its
+deployed image already contains the code), but having it lets the sync
+pipeline be tested end-to-end locally.
+
+`type` is `docker` (Cluster A, deployed via `docker pull`) or `apptainer`
+(LUIS/KISSKI/PC2, deployed as `apptainer pull` into `project_<tag>.sif`;
+after a successful pull every other `project_*.sif` in the home directory
+is deleted, so each cluster holds exactly the current image).
+A deploy only pulls by default - the image is placed on the cluster, not
+started, since on HPC targets a run from `deploy.sh` would land on the
+login node. Experiments are started separately (via `sbatch`); pass
+`--run` (or tick "run after pull" in `deploy.yml`) to also run it once as
+a smoke test. `deploy.sh`/`verify.sh` both read
 this file - keep cluster names, `key` and `type` in sync with whatever
 `cluster-config/*.sh` actually starts. See `doc/clusters.md` for the real
 clusters' connection details and `doc/wp1_proposed_solution.md` §8 for how
 to set up and inspect the local Cluster A simulator.
 
-Build the local simulator with:
+Build the local simulator with (port, user and container name come from
+the `cluster-a` entry - any other `"type": "docker"` entry on `localhost`
+works the same way):
 ```
-./cluster-config/cluster-a-docker.sh ~/workshop-keys/runner_key.pub
+./cluster-config/local-docker.sh cluster-a ~/workshop-keys/runner_key.pub
 ```
 
 ### Adding the SSH key to Cluster A
@@ -192,6 +213,15 @@ current Git SHA and a stable `:dummy` tag:
 ghcr.io/<you>/project:dummy
 ```
 
+On a push (not a manual run) it then also pulls that `<sha>` image onto
+**every `"type": "docker"` cluster in `config/clusters.json`** - one job
+per cluster, `deploy.sh` without `--run`, followed by `verify.sh` for
+those clusters - so e.g. Cluster A always has the latest commit ready.
+Nothing is started. HPC (`apptainer`) clusters are deliberately left
+out: an `apptainer pull` on a shared login node per push is too heavy,
+and it would replace the `.sif` a running experiment series uses -
+deploy those manually via `deploy.yml`.
+
 Useful whenever you need *something* in GHCR to point `deploy.sh`/
 `verify.sh` at without waiting on a full `deploy.yml` run. Reuses the same
 `GHCR_TOKEN` secret as `deploy.yml` - no extra setup. If you want others
@@ -209,19 +239,24 @@ fork), both consumed by the workflows, not committed anywhere:
 | `GHCR_TOKEN` | `docker login` when pushing the build in `deploy.yml`/`build.yml`; optionally reused by `deploy.sh` to log in on the *target* cluster before pulling | Always, for the push. For pulling: only if your GHCR package is **private** - the simplest alternative is making it public, then no pull-side auth is needed at all |
 | `SSH_PRIVATE_KEY` | loaded into an `ssh-agent` at the start of every job that needs SSH (deploy, verify, sync) - never written to disk, see `doc/wp1_proposed_solution.md` §5 | Required for CI. For local use, `ssh-add ~/workshop-keys/runner_key` once per shell session does the same job |
 
-The local Docker simulator (Cluster A) never needs pull-side auth: it
-shares the host's `docker.sock`, so it inherits whatever `docker login` you
-already ran on your laptop. A genuinely separate remote cluster (a real
-Cluster A, or LUIS/KISSKI/PC2) does need it if its package is private.
+Pull-side auth for a private package is needed on **every** cluster,
+including the local simulator: it shares the host's `docker.sock`, but
+registry credentials belong to the docker *client* inside the container,
+so your laptop's `docker login` does **not** carry over. The workflows
+handle this by passing `GHCR_USER`/`GHCR_TOKEN` to `deploy.sh`. Locally,
+either make the package public (recommended for the workshop) or run
+`GHCR_USER=<you> GHCR_TOKEN=<token> ./scripts/deploy.sh ...`.
 
 ## Known pitfalls
 
 | Problem | Fix |
 |---|---|
-| `permission_denied: create_package` on GHCR push | Wrong namespace - set `REGISTRY`/fork owner to your own username |
+| `permission_denied: create_package` on GHCR push | Wrong namespace - push from your own fork (the workflows use its owner) |
+| `unauthorized` when running `deploy.sh` locally | Package is private and the simulator has no GHCR login of its own - make the package public, or pass `GHCR_USER`/`GHCR_TOKEN` |
 | GHCR login fails with a fine-grained token | Use a classic PAT with `write:packages` (add `repo` only if your fork is private) |
 | `docker: permission denied ... docker.sock` in the simulator | GID mismatch between host socket and container group - `cluster-config/local-docker.sh` fixes this at container start |
 | YAML workflow: `No event triggers defined in on` | Usually a copy-paste formatting issue - rewrite with `cat > file << 'EOF' ... EOF` |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED` when connecting to Cluster A | Rebuilding the simulator generates new host keys. `cluster-config/local-docker.sh` removes the stale entry itself; for an older container run `ssh-keygen -R "[localhost]:2222"` once |
 | SSH key auth doesn't work | Check permissions: `chmod 700 ~/.ssh`, `chmod 600 ~/.ssh/authorized_keys` |
 | `usermod` not found on macOS | Docker Desktop handles the docker group itself, no setup needed |
 | LUIS login node kills processes | Only run short tests there; real workloads go through `sbatch`/SLURM |

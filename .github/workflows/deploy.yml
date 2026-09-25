@@ -1,46 +1,77 @@
 name: Multi-Cluster Deploy
 
+# Config-driven, like sync.yml and build.yml: the cluster list comes from
+# config/clusters.json, so a new entry there shows up here automatically.
+
 on:
   workflow_dispatch:
     inputs:
-      deploy_cluster_a:
-        description: 'Cluster A'
-        type: boolean
-        default: true
+      cluster:
+        description: 'Cluster name (leave empty to deploy to every cluster in config/clusters.json)'
+        required: false
+        type: string
       build_container:
         description: 'Build container'
         type: boolean
         default: true
+      run_after_pull:
+        description: 'Also run the container once after pulling (smoke test)'
+        type: boolean
+        default: false
 
 jobs:
-  build:
-    if: ${{ inputs.build_container }}
+  # Resolves the tag (current commit, also when the build is skipped) and
+  # the target cluster list, failing early on an unknown cluster name.
+  plan:
     runs-on: self-hosted
     outputs:
       tag: ${{ steps.vars.outputs.tag }}
+      clusters: ${{ steps.vars.outputs.clusters }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: vars
+        env:
+          CLUSTER: ${{ inputs.cluster }}
+        run: |
+          echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          if [[ -z "$CLUSTER" ]]; then
+            echo "clusters=$(jq -c 'keys' config/clusters.json)" >> "$GITHUB_OUTPUT"
+          elif jq -e --arg c "$CLUSTER" 'has($c)' config/clusters.json > /dev/null; then
+            echo "clusters=$(jq -cn --arg c "$CLUSTER" '[$c]')" >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: cluster '$CLUSTER' not found in config/clusters.json" >&2
+            exit 1
+          fi
+
+  build:
+    needs: plan
+    if: ${{ inputs.build_container }}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set image tag
-        id: vars
-        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
       # Uses github.repository_owner (= your own username in your fork), so
-      # nothing here needs manual editing - unlike REGISTRY in
-      # scripts/deploy.sh and scripts/verify.sh, which you do have to set
-      # to your own username (see README / WP0).
+      # nothing here needs manual editing - scripts/deploy.sh derives the
+      # same owner from the origin remote.
       - name: Build image
-        run: docker build -t ghcr.io/${{ github.repository_owner }}/project:${{ steps.vars.outputs.tag }} .
+        run: docker build -t ghcr.io/${{ github.repository_owner }}/project:${{ needs.plan.outputs.tag }} .
 
       - name: Push image
         run: |
           echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker push ghcr.io/${{ github.repository_owner }}/project:${{ steps.vars.outputs.tag }}
+          docker push ghcr.io/${{ github.repository_owner }}/project:${{ needs.plan.outputs.tag }}
 
-  deploy-cluster-a:
-    needs: build
-    if: ${{ always() && inputs.deploy_cluster_a && !failure() && !cancelled() }}
+  # One job per cluster, fail-fast off, so one cluster failing doesn't
+  # cancel the others (WP1 §1).
+  deploy:
+    needs: [plan, build]
+    if: ${{ always() && needs.plan.result == 'success' && !failure() && !cancelled() }}
     runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        cluster: ${{ fromJSON(needs.plan.outputs.clusters) }}
+    name: deploy (${{ matrix.cluster }})
     steps:
       - uses: actions/checkout@v4
       - name: Set up SSH agent
@@ -49,7 +80,7 @@ jobs:
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
           echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-      - run: ./scripts/deploy.sh cluster-a ${{ needs.build.outputs.tag }}
+      - run: ./scripts/deploy.sh ${{ matrix.cluster }} ${{ needs.plan.outputs.tag }} ${{ inputs.run_after_pull && '--run' || '' }}
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
@@ -58,8 +89,8 @@ jobs:
         run: ssh-agent -k
 
   verify:
-    needs: [build, deploy-cluster-a]
-    if: always()
+    needs: [plan, deploy]
+    if: ${{ always() && needs.plan.result == 'success' }}
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -69,13 +100,14 @@ jobs:
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
           echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
           ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-      - run: ./scripts/verify.sh ${{ needs.build.outputs.tag }}
+      # Only checks the cluster(s) this run deployed to (empty = all).
+      - run: ./scripts/verify.sh ${{ needs.plan.outputs.tag }} ${{ inputs.cluster }}
       - name: Stop SSH agent
         if: always()
         run: ssh-agent -k
 
   summary:
-    needs: [build, deploy-cluster-a, verify]
+    needs: [plan, build, deploy, verify]
     if: always()
     runs-on: self-hosted
     steps:
@@ -84,9 +116,11 @@ jobs:
           {
             echo "### Deploy summary"
             echo
+            echo "Tag \`${{ needs.plan.outputs.tag }}\` -> ${{ inputs.cluster || 'all clusters' }}"
+            echo
             echo "| Job | Result |"
             echo "|---|---|"
             echo "| Build | ${{ needs.build.result }} |"
-            echo "| Cluster A | ${{ needs.deploy-cluster-a.result }} |"
+            echo "| Deploy | ${{ needs.deploy.result }} |"
             echo "| Verify | ${{ needs.verify.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"

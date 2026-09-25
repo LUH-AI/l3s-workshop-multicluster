@@ -4,13 +4,7 @@
     "port": 2222,
     "user": "clustera",
     "key": "~/workshop-keys/runner_key",
-    "type": "docker"
-  },
-  "luis": {
-    "host": "login.cluster.uni-hannover.de",
-    "user": "<your-username>",
-    "key": "~/workshop-keys/runner_key",
-    "type": "apptainer",
-    "sync_path": "/bigwork/<your-username>/multicluster-workshop"
+    "type": "docker",
+    "sync_path": "/home/clustera/workshop"
   }
 }
