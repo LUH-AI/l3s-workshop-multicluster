@@ -9,9 +9,9 @@
   },
   "luis": {
   "host": "login.cluster.uni-hannover.de",
-  "user": "nhwpvore",
+  "user": "<username>",
   "key": "~/workshop-keys/runner_key",
   "type": "apptainer",
-  "sync_path": "/bigwork/nhwpvore/multicluster-workshop"
+  "sync_path": "/bigwork/<username>/multicluster-workshop"
 }
 }
