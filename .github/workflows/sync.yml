@@ -31,10 +31,20 @@ jobs:
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
           echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+
+          echo "--- Byte count ---"
+          wc -c ~/.ssh/deploy_key
+
+          echo "--- First/last bytes (hex) ---"
+          od -c ~/.ssh/deploy_key | head -3
+          od -c ~/.ssh/deploy_key | tail -3
+
+          echo "--- ssh-keygen validation ---"
+          ssh-keygen -y -f ~/.ssh/deploy_key -P "" || echo "SSH-KEYGEN SAYS: INVALID"
+
           ssh-add ~/.ssh/deploy_key
-          rm ~/.ssh/deploy_key
           
       - name: Sync
         run: ./scripts/sync.sh ${{ inputs.cluster }}
