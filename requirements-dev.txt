@@ -1,0 +1,23 @@
+# requirements-dev.txt
+#
+# Local development and workshop tools — NOT installed inside the container.
+# The container's own dependencies are in requirements.txt and are installed
+# via the Dockerfile.
+#
+# Install with:
+#   pip install -r requirements-dev.txt
+#
+# Not every participant needs all of these — see the notes below.
+
+# --- Needed by WP2 participants (alternative solutions comparison) ---
+fabric>=3.2.2        # SSH automation library: fabfile.py, `fab run-benchmark`
+ansible>=9.0         # Static cluster setup: `ansible-playbook setup_hpc.yml`
+ansible-core>=2.16   # Pinned to avoid ansible/ansible-core version drift
+
+# --- Useful for extending the deploy pipeline with Python tooling ---
+pyyaml>=6.0          # Cluster config parsing (if migrating from JSON to YAML)
+jinja2>=3.1          # SLURM template rendering (WP3 Component 1 sbatch templates)
+
+# --- Useful for local experimentation outside the container ---
+py-experimenter      # Same version as in-container, for local DB inspection
+smac                 # Same version as in-container, for local testing
