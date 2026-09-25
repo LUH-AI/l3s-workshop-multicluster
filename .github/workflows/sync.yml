@@ -27,8 +27,12 @@ jobs:
           eval "$(ssh-agent -s)"
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
           echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
-          ssh-add - <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-add ~/.ssh/deploy_key
+          rm ~/.ssh/deploy_key
+          
       - name: Sync
         run: ./scripts/sync.sh ${{ inputs.cluster }}
 
