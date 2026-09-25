@@ -252,6 +252,7 @@ either make the package public (recommended for the workshop) or run
 | Problem | Fix |
 |---|---|
 | `permission_denied: create_package` on GHCR push | Wrong namespace - push from your own fork (the workflows use its owner) |
+| `no image found in image index for architecture amd64` on an HPC cluster | Image was built only for the runner's architecture (e.g. arm64 on Apple Silicon). `build.yml`/`deploy.yml` build `linux/amd64,linux/arm64` via buildx - re-run the build; images pushed before that change stay single-arch |
 | `unauthorized` when running `deploy.sh` locally | Package is private and the simulator has no GHCR login of its own - make the package public, or pass `GHCR_USER`/`GHCR_TOKEN` |
 | GHCR login fails with a fine-grained token | Use a classic PAT with `write:packages` (add `repo` only if your fork is private) |
 | `docker: permission denied ... docker.sock` in the simulator | GID mismatch between host socket and container group - `cluster-config/local-docker.sh` fixes this at container start |
