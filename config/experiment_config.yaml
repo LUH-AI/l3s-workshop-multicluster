@@ -1,0 +1,32 @@
+PY_EXPERIMENTER:
+  n_jobs: 1
+
+  Database:
+    provider: sqlite
+    database: experiments/smac_benchmark
+
+    table:
+      name: smac_benchmark
+      keyfields:
+        algorithm:
+          type: "VARCHAR(255)"
+          values:
+            - "branin"
+        dataset:
+          type: "VARCHAR(255)"
+          values:
+            - "synthetic"
+        seed:
+          type: "INT"
+          values:
+            - "0"
+            - "1"
+            - "2"
+        n_trials:
+          type: "INT"
+          values:
+            - "50"
+      resultfields:
+        incumbent_cost: "FLOAT"
+        elapsed_seconds: "FLOAT"
+        incumbent_config: "TEXT"

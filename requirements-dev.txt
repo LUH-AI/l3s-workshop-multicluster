@@ -1,0 +1,35 @@
+# requirements-dev.txt
+#
+# Local development and workshop tools — NOT installed inside the container.
+# The container's own dependencies are in requirements.txt.
+#
+# Install with:
+#   pip install -r requirements-dev.txt
+#
+# Not every participant needs all of these. Install requirements.txt first.
+
+# --- Deploy tooling (everyone extending the allocator) ---
+jinja2>=3.1,<4.0          # SLURM template rendering
+pyyaml>=6.0               # cluster config parsing
+
+# --- SSH automation (WP2: alternative solutions) ---
+fabric>=3.2               # remote command execution via SSH
+invoke>=2.2               # local task runner (Fabric dependency, also standalone)
+
+# --- Infrastructure automation (WP2: Ansible comparison) ---
+ansible>=9.0              # static cluster setup playbooks
+ansible-core>=2.16
+
+# --- LLM integration (WP3 Component 3: AI-assisted scheduling) ---
+requests>=2.31            # HTTP client for LLM API calls (Ollama, vLLM, etc.)
+# Optional — uncomment if using a specific framework:
+# smolagents>=1.0         # lightweight agent framework (Hugging Face)
+# langchain>=0.2          # full-featured agent framework
+
+# --- Local testing (mirrors in-container deps for DB inspection) ---
+# Already covered by requirements.txt, listed here as a reminder:
+# smac, py-experimenter, ConfigSpace, numpy
+
+# --- MySQL support (only if using MySQL instead of SQLite) ---
+# Uncomment if your experiment_config.yaml uses provider: mysql
+# mysqlclient>=2.2

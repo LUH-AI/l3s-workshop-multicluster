@@ -52,10 +52,16 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 cat > "$BUILD_DIR/Dockerfile" <<DOCKERFILE
 FROM debian:bookworm-slim
 RUN apt-get update \\
-    && apt-get install -y --no-install-recommends openssh-server docker.io rsync \\
+    && apt-get install -y --no-install-recommends openssh-server rsync ca-certificates curl \\
+    && install -m 0755 -d /etc/apt/keyrings \\
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \\
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \\
+    && apt-get update \\
+    && apt-get install -y --no-install-recommends docker-ce-cli \\
     && rm -rf /var/lib/apt/lists/* \\
     && mkdir -p /var/run/sshd \\
     && useradd -m -s /bin/bash ${SSH_USER} \\
+    && groupadd -f docker \\
     && usermod -aG docker ${SSH_USER} \\
     && mkdir -p /home/${SSH_USER}/.ssh \\
     && chmod 700 /home/${SSH_USER}/.ssh
