@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 COPY config/ ./config/
-COPY templates/ ./templates/
+COPY scripts/job.sh.j2 ./templates/job.sh.j2
 COPY version.txt .
 
 ARG GIT_SHA=unknown
