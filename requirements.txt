@@ -1,2 +1,20 @@
-smac
-py-experimenter
+# requirements.txt
+#
+# In-container dependencies — installed inside the Docker/Apptainer image.
+# Keep this in sync with the Dockerfile.
+#
+# Pinned to minor versions for reproducibility across workshop sessions.
+# Run `pip install -r requirements.txt` locally to test outside the container.
+
+# --- Core workload ---
+smac>=2.2,<3.0           # SMAC3: algorithm configuration / HPO
+ConfigSpace>=1.0,<2.0    # search space definitions (SMAC dependency, made explicit)
+
+# --- Experiment management ---
+py-experimenter>=1.4      # DB-backed experiment grid and result tracking
+
+# --- Template rendering (used by allocator inside the container) ---
+jinja2>=3.1,<4.0
+
+# --- Numerical (transitive dep of SMAC, but pinned for stability) ---
+numpy>=1.24,<2.0
