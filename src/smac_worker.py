@@ -146,13 +146,14 @@ def main() -> None:
     experimenter = PyExperimenter(
         experiment_configuration_file_path="config/experiment_config.yaml",
         name="smac_worker",
+        use_codecarbon=False,
     )
 
-    # Fill the grid on first run (idempotent — skips existing rows)
-    experimenter.fill()
+    # Create the table if it doesn't exist, then fill from config grid
+    experimenter.fill_table_from_config()
 
     # Process all unclaimed rows, then exit
-    experimenter.execute(run_experiment, max_experiments=-1)
+    experimenter.execute(run_experiment)
 
 
 if __name__ == "__main__":
