@@ -24,6 +24,16 @@ See also `doc/clusters.md` (per-cluster connection details for
 LUIS/KISSKI/PC2) and `doc/ansible-hpc-automation.md` (the Ansible/Fabric
 tooling referenced in WP2).
 
+Additional documentation added with the WP3 starter code:
+
+- **[Setup Guide](doc/setup.md)** - complete participant onboarding from
+  a fresh machine to a working environment.
+- **[Contributing Guidelines](doc/contributing.md)** - fork model, branch
+  conventions, cross-WP coordination, and PR workflow.
+- **[Feasibility Study: SMAC & AI Scheduling](doc/feasibility_study_smac_agentic_scheduling.md)** -
+  four approaches to multi-cluster experiment distribution with tradeoffs
+  and time estimates.
+
 ## Time budget: 3-4h total, across all three WPs
 
 Each WP doc has its own "Definition of Done for this session" scoped to
@@ -65,6 +75,10 @@ Local machine (your laptop)
                                                   v                        |
 Target clusters
   Cluster A (Docker, local sim)   LUIS (Apptainer, HPC)
+                                          |
+                                          v
+                                    PyExperimenter DB (SQLite / MySQL)
+                                    (experiment grid, results, status)
 ```
 
 ## Repo structure
@@ -78,32 +92,44 @@ multicluster-workshop/
 │   ├── sync.yml               # on push to main: rsync code to every cluster with a sync_path
 │   └── test_runner.yml       # minimal smoke test for your self-hosted runner
 ├── config/
-│   └── clusters.json         # cluster-name -> {host, port, user, key, type, ...}
+│   ├── clusters.json         # cluster-name -> {host, port, user, key, type, ...}
+│   └── experiment_config.yaml # PyExperimenter experiment grid definition
 ├── scripts/
 │   ├── deploy.sh             # ./scripts/deploy.sh <cluster-name> <image-tag> [--run] - pull only unless --run
 │   ├── verify.sh             # ./scripts/verify.sh [tag] [cluster] - expected vs. actual per cluster (default: all)
 │   ├── sync.sh                # ./scripts/sync.sh [cluster-name] - rsync source (default: every cluster with a sync_path)
-│   ├── preflight.sh           # local tooling + SSH reachability checks
+│   ├── preflight.sh           # local tooling + SSH reachability checks (extended: Docker daemon, GHCR, Python tools)
+│   ├── job.sh.j2              # Jinja2 SLURM job template (rendered by allocator.py)
 │   └── create-deployment-info.sh  # optional: commit/tag/timestamp JSON (not wired into CI)
 ├── cluster-config/
 │   └── local-docker.sh        # ./cluster-config/local-docker.sh <cluster-name> <pubkey> - local Docker simulator for any "type": "docker", localhost entry
 ├── doc/
+│   ├── setup.md               # participant onboarding guide (start here if new)
+│   ├── contributing.md        # fork model, branch conventions, cross-WP coordination
+│   ├── feasibility_study_smac_agentic_scheduling.md  # four scheduling approaches for WP3
 │   ├── wp1_proposed_solution.md
 │   ├── wp2_alternative_solutions.md
 │   ├── wp3.md
 │   ├── clusters.md
 │   └── ansible-hpc-automation.md
-├── src/hello.py                # placeholder workload (WP3 Component 2 replaces this with PyExperimenter)
+├── src/
+│   ├── smac_worker.py         # SMAC benchmark worker (PyExperimenter) - replaces hello.py
+│   ├── cluster_state.py       # query cluster capacity via SSH (sinfo/squeue)
+│   ├── allocator.py           # multi-cluster experiment allocator
+│   └── llm_scheduler.py       # optional: LLM-generated sbatch scripts / agentic scheduling
 ├── deploy.sh                    # wrapper -> scripts/deploy.sh (so `./deploy.sh ...` works too)
 ├── version.txt
-├── requirements.txt
-└── Dockerfile
+├── requirements.txt             # in-container Python deps (smac, py-experimenter, jinja2, etc.)
+├── requirements-dev.txt         # local/participant Python deps (fabric, ansible, pyyaml, etc.)
+└── Dockerfile                   # Python 3.10 + swig/g++ + SMAC + PyExperimenter
 ```
 
 ## Individual setup
 
 Do this before anything else - none of the scripts or workflows below can
 be tested without it. You'll need Docker installed locally.
+
+> **For a more detailed walkthrough, see [`doc/setup.md`](doc/setup.md).**
 
 **Supported platforms:** macOS and Linux. The scripts need `bash`, `jq`,
 `rsync`, `ssh` and `docker` (macOS: `brew install jq`; Debian/Ubuntu:
@@ -148,6 +174,11 @@ WSL; PowerShell and Git Bash lack `rsync`/`jq`.
 7. Once a cluster simulator exists, the runner's **public** key needs to
    be in that container's `~/.ssh/authorized_keys` too - see "Adding the
    SSH key to Cluster A" under "Cluster config" below.
+8. Install Python dependencies (Python 3.10 required for SMAC compatibility):
+   ```bash
+   pip install -r requirements.txt
+   pip install -r requirements-dev.txt    # optional: fabric, ansible, jinja2
+   ```
 
 **Definition of Done:** `docker ps` works, `docker login ghcr.io` with your
 token works, a test push to `ghcr.io/<you>/project:test` works, the runner
@@ -229,6 +260,33 @@ to `docker pull` it without a token, set the GHCR package visibility to
 public afterwards (GitHub -> your profile -> Packages -> project ->
 Package settings).
 
+## Experiment orchestration (WP3 starter code)
+
+The repo includes starter code for running SMAC benchmarks across
+clusters, managed by PyExperimenter as the central experiment database:
+
+1. **`config/experiment_config.yaml`** defines the experiment grid
+   (algorithm × dataset × seed). PyExperimenter creates one database
+   row per combination.
+2. **`src/smac_worker.py`** runs inside each SLURM job - it claims an
+   unclaimed row, runs SMAC, and writes the result back.
+3. **`src/allocator.py`** reads experiment and cluster state, decides
+   how many workers to start on each cluster, and generates SLURM
+   scripts from `scripts/job.sh.j2`.
+4. **`src/llm_scheduler.py`** (optional) replaces template rendering
+   with LLM-generated scripts or wraps the allocator in an agentic loop.
+
+Quick test (no cluster needed):
+
+```bash
+python src/allocator.py --plan       # see experiment allocation
+python src/cluster_state.py          # see cluster status
+python src/smac_worker.py            # run SMAC benchmarks (creates experiments/ dir)
+```
+
+See `doc/feasibility_study_smac_agentic_scheduling.md` for four
+scheduling approaches with time estimates and a decision table.
+
 ## Secrets
 
 Two repo secrets (Settings -> Secrets and variables -> Actions in your
@@ -252,12 +310,17 @@ either make the package public (recommended for the workshop) or run
 | Problem | Fix |
 |---|---|
 | `permission_denied: create_package` on GHCR push | Wrong namespace - push from your own fork (the workflows use its owner) |
-| `no image found in image index for architecture amd64` on an HPC cluster | Image was built only for the runner's architecture (e.g. arm64 on Apple Silicon). `build.yml`/`deploy.yml` build `linux/amd64,linux/arm64` via buildx - re-run the build; images pushed before that change stay single-arch |
 | `unauthorized` when running `deploy.sh` locally | Package is private and the simulator has no GHCR login of its own - make the package public, or pass `GHCR_USER`/`GHCR_TOKEN` |
 | GHCR login fails with a fine-grained token | Use a classic PAT with `write:packages` (add `repo` only if your fork is private) |
-| `docker: permission denied ... docker.sock` in the simulator | GID mismatch between host socket and container group - `cluster-config/local-docker.sh` fixes this at container start |
+| `docker: permission denied ... docker.sock` | Linux: `sudo usermod -aG docker $USER`, then log out and back in. In the simulator: GID mismatch - `cluster-config/local-docker.sh` fixes this at container start |
+| `client version 1.41 is too old` in simulator | Rebuild: `docker rm -f cluster-a && ./cluster-config/local-docker.sh cluster-a ~/workshop-keys/runner_key.pub` |
 | YAML workflow: `No event triggers defined in on` | Usually a copy-paste formatting issue - rewrite with `cat > file << 'EOF' ... EOF` |
 | `REMOTE HOST IDENTIFICATION HAS CHANGED` when connecting to Cluster A | Rebuilding the simulator generates new host keys. `cluster-config/local-docker.sh` removes the stale entry itself; for an older container run `ssh-keygen -R "[localhost]:2222"` once |
-| SSH key auth doesn't work | Check permissions: `chmod 700 ~/.ssh`, `chmod 600 ~/.ssh/authorized_keys` |
+| SSH key auth doesn't work / password prompt | `ssh-add ~/workshop-keys/runner_key` (key not loaded in agent - resets every new terminal) |
 | `usermod` not found on macOS | Docker Desktop handles the docker group itself, no setup needed |
+| `pip install smac` fails with build error | Install build tools: `brew install swig` (macOS) or `sudo apt install swig g++` (Ubuntu) |
+| PyExperimenter `Missing key Database` | Check `config/experiment_config.yaml` uses `Database:` nesting - see the file for correct format |
+| PyExperimenter `Keyfield type must be a string` | Quote all `type` and integer `values` in the YAML: `type: "INT"`, values: `- "0"` |
+| `smac_worker.py` crashes with codecarbon TypeError | Already fixed: `use_codecarbon=False` in the PyExperimenter constructor |
+| `smac_worker.py` crashes with DB locked | SQLite doesn't support concurrent writes - switch to MySQL for multi-cluster |
 | LUIS login node kills processes | Only run short tests there; real workloads go through `sbatch`/SLURM |
