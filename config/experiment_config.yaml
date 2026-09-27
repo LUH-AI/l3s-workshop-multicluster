@@ -1,0 +1,87 @@
+# PyExperimenter experiment grid configuration.
+#
+# This file defines the experiment table schema, the parameter grid,
+# and the database connection. PyExperimenter creates one row per
+# combination of keyfields; workers claim and process rows.
+#
+# Docs: https://tornede.github.io/py_experimenter/
+#
+# TODO for participants:
+#   - [ ] Add real algorithm names and datasets
+#   - [ ] Add more seeds for statistical significance (e.g. 1..30)
+#   - [ ] Switch from SQLite to MySQL for multi-cluster shared access
+#   - [ ] Add result columns for memory usage, number of evaluations, etc.
+
+PY_EXPERIMENTER:
+  # --- Database connection ---
+  # SQLite: simple, file-based, good for single-cluster or local testing.
+  # For multi-cluster with shared access, switch to MySQL:
+  #   provider: mysql
+  #   database: experiments
+  #   host: your-db-host.uni-hannover.de
+  #   port: 3306
+  #   user: experimenter
+  #   password: <from-env-or-secret>
+  provider: sqlite
+  database: experiments/smac_benchmark.db
+
+  # --- Experiment table ---
+  table:
+    name: smac_benchmark
+
+    # Keyfields define the experiment grid.
+    # One row is created for each combination.
+    keyfields:
+      algorithm:
+        type: VARCHAR(255)
+        values:
+          - branin
+          # TODO: add real benchmarks:
+          # - svm_iris
+          # - rf_openml
+          # - xgb_tabular
+
+      dataset:
+        type: VARCHAR(255)
+        values:
+          - synthetic
+          # TODO: add real dataset identifiers:
+          # - openml:31      # credit-g
+          # - openml:1489    # phoneme
+          # - openml:3945    # car
+
+      seed:
+        type: INT
+        values:
+          - 0
+          - 1
+          - 2
+          # TODO: extend to 10 or 30 seeds for publication-quality results
+
+      n_trials:
+        type: INT
+        values:
+          - 50
+          # TODO: add larger budgets:
+          # - 100
+          # - 200
+
+    # Result columns — written by the worker after each run.
+    resultfields:
+      incumbent_cost:
+        type: FLOAT
+      elapsed_seconds:
+        type: FLOAT
+      incumbent_config:
+        type: TEXT
+      # TODO: add more as needed:
+      # memory_peak_mb:
+      #   type: FLOAT
+      # n_evaluations:
+      #   type: INT
+      # error_message:
+      #   type: TEXT
+
+  # --- Custom config passed to the worker function ---
+  custom:
+    smac_output_dir: /tmp/smac_output
