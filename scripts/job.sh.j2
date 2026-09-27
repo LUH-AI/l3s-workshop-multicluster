@@ -1,0 +1,58 @@
+#!/bin/bash
+{# ── SLURM job template ─────────────────────────────────────────────
+   Rendered by the allocator using cluster profile values.
+   Each generated script runs one or more PyExperimenter workers
+   that claim rows from the shared database.
+
+   Variables injected by the allocator:
+     cluster     - cluster profile dict (from clusters.json / clusters.yaml)
+     job_name    - descriptive name for this batch
+     n_workers   - how many parallel workers to start (one per task)
+     image_tag   - container image tag to run
+     registry    - GHCR registry path
+     extra_env   - dict of additional environment variables
+
+   TODO for participants:
+     - [ ] Add --mail-user / --mail-type from cluster profile
+     - [ ] Add array job support: #SBATCH --array=1-{{ n_workers }}
+     - [ ] Handle module loads from cluster profile
+     - [ ] Add Apptainer bind mounts for /scratch
+#}
+
+#SBATCH --job-name={{ job_name }}
+#SBATCH --partition={{ cluster.slurm.partition }}
+{% if cluster.slurm.account is defined %}
+#SBATCH --account={{ cluster.slurm.account }}
+{% endif %}
+#SBATCH --time={{ cluster.slurm.time | default("04:00:00") }}
+#SBATCH --nodes={{ cluster.slurm.nodes | default(1) }}
+#SBATCH --ntasks-per-node={{ n_workers | default(1) }}
+#SBATCH --cpus-per-task={{ cluster.slurm.cpus_per_task | default(4) }}
+#SBATCH --mem={{ cluster.slurm.mem | default("16G") }}
+#SBATCH --output={{ cluster.scratch_dir }}/logs/%x_%j.out
+#SBATCH --error={{ cluster.scratch_dir }}/logs/%x_%j.err
+
+# ── Environment setup ───────────────────────────────────────────────
+{% for mod in cluster.modules | default([]) %}
+module load {{ mod }}
+{% endfor %}
+
+{% for key, val in extra_env.items() %}
+export {{ key }}="{{ val }}"
+{% endfor %}
+
+# Create log directory if missing
+mkdir -p {{ cluster.scratch_dir }}/logs
+
+# ── Run the worker ──────────────────────────────────────────────────
+{% if cluster.env_manager | default("pixi") == "apptainer" %}
+# Apptainer: run inside the container image
+apptainer exec \
+    --bind {{ cluster.scratch_dir }}:/scratch \
+    {{ cluster.scratch_dir }}/project_{{ image_tag }}.sif \
+    python /app/src/smac_worker.py
+{% else %}
+# Pixi / bare environment: run directly
+cd {{ cluster.repo_path }}
+pixi run python src/smac_worker.py
+{% endif %}
