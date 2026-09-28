@@ -1,5 +1,7 @@
 # Multicluster Workshop
 
+Google Doc Link for documentation: https://docs.google.com/document/d/1NuCSgZUgpmlF0FqM69olTEBSOrzrL12ooCNQkdBXK_Q/edit?usp=sharing
+
 A deployment pipeline that builds a container once, pushes it to GHCR, and
 rolls it out via SSH to multiple clusters - a local Docker simulator
 standing in for a real target during development, plus real HPC clusters
