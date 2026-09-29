@@ -1,0 +1,43 @@
+# reducer on cluster A, pinned to node2. Only the gateway talks to it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reducer
+  labels: {app: reducer}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: reducer}
+  template:
+    metadata:
+      labels: {app: reducer}
+    spec:
+      nodeSelector:
+        multi-cluster/node: node2
+      containers:
+        - name: reducer
+          image: reducer:latest
+          imagePullPolicy: Never          # loaded with: minikube -p cluster-a image load
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SLURM_AGENT_URL
+              value: http://slurm-agent:8090
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reducer
+spec:
+  selector: {app: reducer}
+  ports:
+    - port: 8080
+      targetPort: 8080

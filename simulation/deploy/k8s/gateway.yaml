@@ -1,0 +1,49 @@
+# gateway on cluster A, pinned to node1. Reachable from outside the cluster on
+# NodePort 30080. It reaches the slurm-agent on cluster B through the
+# "slurm-agent" Service (added when the clusters are connected, step 3).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels: {app: gateway}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: gateway}
+  template:
+    metadata:
+      labels: {app: gateway}
+    spec:
+      nodeSelector:
+        multi-cluster/node: node1
+      containers:
+        - name: gateway
+          image: gateway:latest
+          imagePullPolicy: Never          # loaded with: minikube -p cluster-a image load
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SLURM_AGENT_URL
+              value: http://slurm-agent:8090
+            - name: REDUCER_URL
+              value: http://reducer:8080
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+spec:
+  type: NodePort
+  selector: {app: gateway}
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
