@@ -1,0 +1,4 @@
+#!/bin/sh
+# After a rebase (incl. `git pull --rebase`). Amends are covered by post-commit.
+[ "$1" = rebase ] || exit 0
+exec "$(dirname "$0")/fab-auto" ORIG_HEAD

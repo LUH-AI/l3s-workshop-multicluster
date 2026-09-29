@@ -220,4 +220,5 @@ __marimo__/
 # Workshop-specific
 .DS_Store
 deployment-info.json
+config/clusters.local.json
 *.sif

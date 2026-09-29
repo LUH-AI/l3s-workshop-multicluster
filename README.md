@@ -54,29 +54,26 @@ default for getting results into the central DB (see `doc/wp3.md`
 Component 2) so it isn't blocked if WP1's live SSH tunnel isn't ready in
 time - that tunnel is a nice-to-have upgrade, not a dependency.
 
-## Model: everyone forks, everyone runs their own runner
+## Model: everyone forks, Fabric provides the environment
 
 This repo is public. There's no shared infrastructure for individual
-development: each contributor **forks** it, runs their **own**
-self-hosted GitHub Actions runner, and pushes to their **own** GHCR
-namespace - see Individual setup below. `doc/wp1_proposed_solution.md` §4 describes
-the target production setup (one runner, permanently on dedicated
-hardware) - that's the deployment target this pipeline is designed for,
-distinct from each contributor's own fork used for development.
+development: each contributor **forks** it and pushes to their **own**
+GHCR namespace - see Individual setup below. No GitHub Actions runner is
+involved: `fabfile.py` builds the runtime **environment** image (Python +
+SMAC/PyExperimenter, no project code) on your machine, pushes it to GHCR
+and puts it onto every cluster over SSH - Docker or Apptainer per
+cluster. Getting the project *code* onto the clusters is a separate step
+and not part of this pipeline.
 
 ## Architecture
 
 ```
-Cloud services
-  GitHub repo (private/your fork) --> GitHub Actions (build+push) --> GHCR (ghcr.io/<you>/project)
-                    ^
-                    | git push
 Local machine (your laptop)
-  Self-hosted runner (Docker + Actions) --> deploy scripts (deploy · sync · verify)
-                                                  | SSH deploy              ^ image pull
-                                                  v                        |
-Target clusters
-  Cluster A (Docker, local sim)   LUIS (Apptainer, HPC)
+  fab release:  build (only if Dockerfile/requirements.txt changed) --push--> GHCR (ghcr.io/<you>/project:env-<hash>)
+                deploy (only where missing)  --SSH-->  clusters pull from GHCR
+                                                                   |
+Target clusters                                                    v
+  Cluster A (docker, local sim)   LUIS (apptainer, HPC)     runtime per cluster: "type" in clusters.json
                                           |
                                           v
                                     PyExperimenter DB (SQLite / MySQL)
@@ -87,12 +84,6 @@ Target clusters
 
 ```
 multicluster-workshop/
-├── .github/workflows/
-│   ├── build.yml            # on push to main: pushes ghcr.io/<you>/project:<sha> + :dummy, then pull-only deploy to every docker cluster in clusters.json
-│   ├── deploy.yml            # workflow_dispatch: build + deploy to one cluster or all in clusters.json
-│   ├── health.yml            # manual verify run (no deploy)
-│   ├── sync.yml               # on push to main: rsync code to every cluster with a sync_path
-│   └── test_runner.yml       # minimal smoke test for your self-hosted runner
 ├── config/
 │   ├── clusters.json         # cluster-name -> {host, port, user, key, type, ...}
 │   └── experiment_config.yaml # PyExperimenter experiment grid definition
@@ -120,15 +111,17 @@ multicluster-workshop/
 │   ├── allocator.py           # multi-cluster experiment allocator
 │   └── llm_scheduler.py       # optional: LLM-generated sbatch scripts / agentic scheduling
 ├── deploy.sh                    # wrapper -> scripts/deploy.sh (so `./deploy.sh ...` works too)
+├── fabfile.py                   # Fabric: build/deploy/verify the environment image on all clusters (`fab release`)
+├── .githooks/                   # post-commit/-merge/-rewrite: auto `fab release` on env changes (`fab install-hooks`)
 ├── version.txt
 ├── requirements.txt             # in-container Python deps (smac, py-experimenter, jinja2, etc.)
 ├── requirements-dev.txt         # local/participant Python deps (fabric, ansible, pyyaml, etc.)
-└── Dockerfile                   # Python 3.10 + swig/g++ + SMAC + PyExperimenter
+└── Dockerfile                   # environment only: Python 3.10 + swig/g++ + SMAC + PyExperimenter (no project code)
 ```
 
 ## Individual setup
 
-Do this before anything else - none of the scripts or workflows below can
+Do this before anything else - none of the tasks or scripts below can
 be tested without it. You'll need Docker installed locally.
 
 > **For a more detailed walkthrough, see [`doc/setup.md`](doc/setup.md).**
@@ -136,18 +129,15 @@ be tested without it. You'll need Docker installed locally.
 **Supported platforms:** macOS and Linux. The scripts need `bash`, `jq`,
 `rsync`, `ssh` and `docker` (macOS: `brew install jq`; Debian/Ubuntu:
 `sudo apt install jq rsync`). Windows works only via **WSL2** with Docker
-Desktop's WSL backend - run the scripts *and* the self-hosted runner inside
-WSL; PowerShell and Git Bash lack `rsync`/`jq`.
+Desktop's WSL backend - run the scripts and `fab` inside WSL; PowerShell and Git Bash lack `rsync`/`jq`.
 
 1. Fork this repo, clone your fork.
-2. Nothing to edit for the image registry: the workflows push to
-   `ghcr.io/<your-username>/project`, and `scripts/deploy.sh` derives the
-   same owner from your fork's `origin` remote (override with
-   `REGISTRY=ghcr.io/<owner>/project` if needed). After the first push
-   (step 7's test run or any push to `main`), set the package to
-   **public** (GitHub -> your profile -> Packages -> project -> Package
-   settings) - otherwise running `deploy.sh` locally fails with
-   `unauthorized` (see "Secrets" below).
+2. Nothing to edit for the image registry: `fabfile.py` pushes to
+   `ghcr.io/<your-username>/project`, deriving the owner from your fork's
+   `origin` remote (override with `REGISTRY=ghcr.io/<owner>/project` if
+   needed). After the first `fab build`, set the package to **public** (GitHub -> your profile ->
+   Packages -> project -> Package settings) - otherwise deploying fails
+   with `unauthorized` unless you export `GHCR_TOKEN` (see "Secrets" below).
 3. Create a classic GitHub PAT with the **`write:packages`** scope (a
    fine-grained token does not reliably work with GHCR; `write:packages`
    already covers pulling too, so `read:packages` isn't needed
@@ -156,35 +146,28 @@ WSL; PowerShell and Git Bash lack `rsync`/`jq`.
    ```bash
    ssh-keygen -t ed25519 -f ~/workshop-keys/runner_key -N ""
    ```
-5. Store both as repo secrets. In your fork on GitHub: **Settings ->
-   Secrets and variables -> Actions -> New repository secret**:
-   - `GHCR_TOKEN` - the PAT from step 3
-   - `SSH_PRIVATE_KEY` - the private key content, from `cat ~/workshop-keys/runner_key`
-
-   Every workflow loads this straight into an `ssh-agent` at the start of
-   the run (see `doc/wp1_proposed_solution.md` §5) - it never touches disk
-   in CI. Running the scripts **locally** (outside a workflow) needs the
-   same thing done by hand once per shell session:
+5. Log in to GHCR with the PAT once (`docker login ghcr.io -u <you>`),
+   or export it as `GHCR_TOKEN` (plus `GHCR_USER`) - `fab` then also uses
+   it for pulls of a private package on the clusters. Load the SSH key
+   once per shell session:
    ```bash
    ssh-add ~/workshop-keys/runner_key
    ```
-   `scripts/preflight.sh` checks for this and tells you if nothing's
-   loaded.
-6. Register a self-hosted runner in your fork (Settings -> Actions ->
-   Runners -> New self-hosted runner) and run the setup commands GitHub
-   shows you there. Keep it running (`./run.sh`).
-7. Once a cluster simulator exists, the runner's **public** key needs to
-   be in that container's `~/.ssh/authorized_keys` too - see "Adding the
-   SSH key to Cluster A" under "Cluster config" below.
-8. Install Python dependencies (Python 3.10 required for SMAC compatibility):
+   (`fab` also falls back to the `key` file from `clusters.json`;
+   `scripts/preflight.sh` checks the agent and tells you if nothing's
+   loaded.)
+6. Once a cluster simulator exists, the **public** key needs to be in
+   that container's `~/.ssh/authorized_keys` - see "Adding the SSH key to
+   Cluster A" under "Cluster config" below.
+7. Install Python dependencies (Python 3.10 required for SMAC compatibility):
    ```bash
    pip install -r requirements.txt
-   pip install -r requirements-dev.txt    # optional: fabric, ansible, jinja2
+   pip install -r requirements-dev.txt    # fabric (needed for deploying), ansible, jinja2
    ```
 
 **Definition of Done:** `docker ps` works, `docker login ghcr.io` with your
-token works, a test push to `ghcr.io/<you>/project:test` works, the runner
-shows "Idle", and `.github/workflows/test_runner.yml` runs successfully.
+token works, and `fab release --cluster cluster-a` ends with Cluster A
+showing ✓.
 
 ## Cluster config (`config/clusters.json`)
 
@@ -196,10 +179,20 @@ One entry per cluster, keyed by name:
 }
 ```
 
-`sync_path` is optional: only clusters that have one are targeted by
-`scripts/sync.sh`/`sync.yml`. Cluster A doesn't strictly need it (its
-deployed image already contains the code), but having it lets the sync
-pipeline be tested end-to-end locally.
+**Personal entries** (your own LUIS username etc.) go into
+`config/clusters.local.json` - gitignored, same format, merged per cluster
+over `clusters.json` by `fabfile.py` (the bash scripts only read
+`clusters.json`). That way a shared repo's config stays untouched:
+
+```json
+{
+  "luis": { "host": "login.cluster.uni-hannover.de", "user": "<your-username>",
+            "key": "~/workshop-keys/runner_key", "type": "apptainer" }
+}
+```
+
+`sync_path` is optional and only used by `scripts/sync.sh` (code sync -
+not part of the Fabric environment pipeline).
 
 `type` is `docker` (Cluster A, deployed via `docker pull`) or `apptainer`
 (LUIS/KISSKI/PC2, deployed as `apptainer pull` into `project_<tag>.sif`;
@@ -208,8 +201,8 @@ is deleted, so each cluster holds exactly the current image).
 A deploy only pulls by default - the image is placed on the cluster, not
 started, since on HPC targets a run from `deploy.sh` would land on the
 login node. Experiments are started separately (via `sbatch`); pass
-`--run` (or tick "run after pull" in `deploy.yml`) to also run it once as
-a smoke test. `deploy.sh`/`verify.sh` both read
+`--run` to `fab deploy` (or `deploy.sh`) to also run it once as
+a smoke test. `fabfile.py` and `deploy.sh`/`verify.sh` all read
 this file - keep cluster names, `key` and `type` in sync with whatever
 `cluster-config/*.sh` actually starts. See `doc/clusters.md` for the real
 clusters' connection details and `doc/wp1_proposed_solution.md` §8 for how
@@ -235,32 +228,71 @@ building the container):
 cat ~/workshop-keys/runner_key.pub | docker exec -i cluster-a sh -c 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys'
 ```
 
-## Placeholder image
+## Providing the environment: Fabric (`fabfile.py`)
 
-`.github/workflows/build.yml` builds and pushes an image independently of
-a full deploy run (Actions -> "Build placeholder container" -> Run
-workflow, or automatically on every push to `main`), tagged both with the
-current Git SHA and a stable `:dummy` tag:
+The image is only the runtime environment - the Dockerfile installs
+`requirements.txt` and copies no project code. Its tag is a hash of
+`Dockerfile` + `requirements.txt` (e.g. `env-1de35243e5e8`), so it only
+changes when the environment does. From the repo root (`pip install -r
+requirements-dev.txt` first):
 
+```bash
+fab release                               # build if needed, deploy where needed, verify - all clusters
+fab release --cluster cluster-a --run     # one cluster (or a,b,c), plus an environment smoke test
+fab verify                                # does every cluster have the current environment?
+fab tag                                   # which image/tag the current files map to
+fab build / fab deploy                    # the individual steps; --force to redo anyway
 ```
-ghcr.io/<you>/project:dummy
+
+- `fab build` skips the build if `env-<hash>` is already in GHCR.
+- `fab deploy` skips every cluster that already has it (`~/.deployed_tag`
+  plus the image/`.sif` actually present), so re-running is cheap and an
+  HPC cluster's `.sif` is only replaced when the environment really
+  changed.
+- The runtime per cluster comes from `"type"` in `config/clusters.json`:
+  `docker` -> `docker pull`, `apptainer` -> `apptainer pull
+  project_<tag>.sif`. After a successful pull each cluster keeps only the
+  current environment (older `.sif` files / older image tags are removed -
+  on the Cluster A simulator that's your laptop's Docker, since it shares
+  `docker.sock`).
+- The code is bound in at run time, e.g. `apptainer exec --bind
+  <repo_path>:/app ... python /app/src/smac_worker.py` (see
+  `scripts/job.sh.j2`).
+
+GHCR auth: export `GHCR_TOKEN` (and `GHCR_USER`, default = repo owner) for
+pulls of a private package - it's sent over SSH stdin for that one pull,
+nothing is stored on the cluster; without it pulls run unauthenticated and
+the push uses your `docker login`. `fab build` uses a dedicated
+multi-arch buildx builder (`multicluster`, created on first use); on plain
+Linux Docker install QEMU first (`docker run --privileged --rm
+tonistiigi/binfmt --install all`) or pass `--platforms linux/amd64`.
+
+### Automatic: git hooks
+
+```bash
+fab install-hooks                                   # once per clone
+git config multicluster.autoClusters cluster-a      # optional: which clusters (default cluster-a; "a,b" or "all")
+git config multicluster.registry ghcr.io/<you>/project   # optional: only if origin isn't your fork
 ```
 
-On a push (not a manual run) it then also pulls that `<sha>` image onto
-**every `"type": "docker"` cluster in `config/clusters.json`** - one job
-per cluster, `deploy.sh` without `--run`, followed by `verify.sh` for
-those clusters - so e.g. Cluster A always has the latest commit ready.
-Nothing is started. HPC (`apptainer`) clusters are deliberately left
-out: an `apptainer pull` on a shared login node per push is too heavy,
-and it would replace the `.sif` a running experiment series uses -
-deploy those manually via `deploy.yml`.
+From then on, every commit, `git pull`/merge or rebase that changes
+`Dockerfile` or `requirements.txt` (`ENV_FILES` in `fabfile.py`) starts
+`fab release` in the background - nothing happens for any other commit.
+Output goes to `.fab-release.log` (plus a macOS notification when done).
+Only one release runs at a time; a change arriving meanwhile gets a
+follow-up run. Uncommitted edits to an environment file skip the run
+until they're committed.
 
-Useful whenever you need *something* in GHCR to point `deploy.sh`/
-`verify.sh` at without waiting on a full `deploy.yml` run. Reuses the same
-`GHCR_TOKEN` secret as `deploy.yml` - no extra setup. If you want others
-to `docker pull` it without a token, set the GHCR package visibility to
-public afterwards (GitHub -> your profile -> Packages -> project ->
-Package settings).
+HPC clusters are left out by default on purpose: a new `.sif` would
+replace the one a running experiment series uses - deploy those with
+`fab release --cluster luis` when it suits you, or add them to
+`autoClusters`. Hooks run without your shell's exports, so `GHCR_TOKEN`
+isn't available there: make the package public, or the automatic pull on
+the clusters fails with `unauthorized`. Turn it off with `git config
+--unset core.hooksPath`.
+
+`scripts/deploy.sh`/`verify.sh` still work for manual use, but default to
+the Git SHA as tag - pass the `env-...` tag from `fab tag` explicitly.
 
 ## Experiment orchestration (WP3 starter code)
 
@@ -291,32 +323,27 @@ scheduling approaches with time estimates and a decision table.
 
 ## Secrets
 
-Two repo secrets (Settings -> Secrets and variables -> Actions in your
-fork), both consumed by the workflows, not committed anywhere:
+Nothing is stored in GitHub. Both credentials stay on your machine:
 
-| Secret | Used for | Required? |
-|---|---|---|
-| `GHCR_TOKEN` | `docker login` when pushing the build in `deploy.yml`/`build.yml`; optionally reused by `deploy.sh` to log in on the *target* cluster before pulling | Always, for the push. For pulling: only if your GHCR package is **private** - the simplest alternative is making it public, then no pull-side auth is needed at all |
-| `SSH_PRIVATE_KEY` | loaded into an `ssh-agent` at the start of every job that needs SSH (deploy, verify, sync) - never written to disk, see `doc/wp1_proposed_solution.md` §5 | Required for CI. For local use, `ssh-add ~/workshop-keys/runner_key` once per shell session does the same job |
+| Credential | Used for |
+|---|---|
+| `GHCR_TOKEN` (classic PAT, `write:packages`) - via `docker login ghcr.io` or exported | `fab build`'s push; exported, also pulls of a **private** package on the clusters - the simplest alternative is making the package public, then no pull-side auth is needed at all |
+| SSH key (`~/workshop-keys/runner_key`) - `ssh-add` it once per shell session | Every `fab deploy/verify` (and the scripts) |
 
 Pull-side auth for a private package is needed on **every** cluster,
 including the local simulator: it shares the host's `docker.sock`, but
 registry credentials belong to the docker *client* inside the container,
-so your laptop's `docker login` does **not** carry over. The workflows
-handle this by passing `GHCR_USER`/`GHCR_TOKEN` to `deploy.sh`. Locally,
-either make the package public (recommended for the workshop) or run
-`GHCR_USER=<you> GHCR_TOKEN=<token> ./scripts/deploy.sh ...`.
+so your laptop's `docker login` does **not** carry over.
 
 ## Known pitfalls
 
 | Problem | Fix |
 |---|---|
-| `permission_denied: create_package` on GHCR push | Wrong namespace - push from your own fork (the workflows use its owner) |
+| `permission_denied: create_package` on GHCR push | Wrong namespace - push from your own fork (the build uses its owner) |
 | `unauthorized` when running `deploy.sh` locally | Package is private and the simulator has no GHCR login of its own - make the package public, or pass `GHCR_USER`/`GHCR_TOKEN` |
 | GHCR login fails with a fine-grained token | Use a classic PAT with `write:packages` (add `repo` only if your fork is private) |
 | `docker: permission denied ... docker.sock` | Linux: `sudo usermod -aG docker $USER`, then log out and back in. In the simulator: GID mismatch - `cluster-config/local-docker.sh` fixes this at container start |
 | `client version 1.41 is too old` in simulator | Rebuild: `docker rm -f cluster-a && ./cluster-config/local-docker.sh cluster-a ~/workshop-keys/runner_key.pub` |
-| YAML workflow: `No event triggers defined in on` | Usually a copy-paste formatting issue - rewrite with `cat > file << 'EOF' ... EOF` |
 | `REMOTE HOST IDENTIFICATION HAS CHANGED` when connecting to Cluster A | Rebuilding the simulator generates new host keys. `cluster-config/local-docker.sh` removes the stale entry itself; for an older container run `ssh-keygen -R "[localhost]:2222"` once |
 | SSH key auth doesn't work / password prompt | `ssh-add ~/workshop-keys/runner_key` (key not loaded in agent - resets every new terminal) |
 | `usermod` not found on macOS | Docker Desktop handles the docker group itself, no setup needed |
