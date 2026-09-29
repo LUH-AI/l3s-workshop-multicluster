@@ -35,6 +35,7 @@
 #SBATCH --mem={{ cluster.slurm.mem | default("8G") }}
 #SBATCH --output={{ cluster.scratch_dir }}/logs/%x_%j.out
 #SBATCH --error={{ cluster.scratch_dir }}/logs/%x_%j.err
+#SBATCH --chdir={{ cluster.repo_path }}
 
 # ── Environment setup ───────────────────────────────────────────────
 {% for mod in cluster.modules | default([]) %}
