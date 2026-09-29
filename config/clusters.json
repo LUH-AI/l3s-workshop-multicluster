@@ -6,5 +6,24 @@
     "key": "~/workshop-keys/runner_key",
     "type": "docker",
     "sync_path": "/home/clustera/workshop"
+  },
+  "kisski": {
+    "host": "glogin-gpu.hpc.gwdg.de",
+    "port": 22,
+    "user": "u31890",
+    "key": "~/.ssh/id_ed25519",
+    "type": "slurm",
+    "env_manager": "conda",
+    "conda_env": "smac-env",
+    "modules": ["miniforge3"],
+    "repo_path": "/projects/extern/kisski/kisski-multicluster/dir.project",
+    "scratch_dir": "/projects/extern/kisski/kisski-multicluster/dir.project",
+    "slurm": {
+      "partition": "kisski",
+      "time": "00:05:00",
+      "nodes": 1,
+      "cpus_per_task": 4,
+      "mem": "8G"
+    }
   }
 }

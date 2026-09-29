@@ -4,7 +4,7 @@
    Each generated script runs one or more PyExperimenter workers
    that claim rows from the shared database.
 
-   Variables injected by the allocator:
+   Variables injected by the allocator / run_smac_slurm.py:
      cluster     - cluster profile dict (from clusters.json / clusters.yaml)
      job_name    - descriptive name for this batch
      n_workers   - how many parallel workers to start (one per task)
@@ -12,10 +12,14 @@
      registry    - GHCR registry path
      extra_env   - dict of additional environment variables
 
+   env_manager values:
+     apptainer   - run inside a Singularity/Apptainer SIF image
+     conda       - module load miniforge3, then conda activate <env>
+     pixi        - pixi run (default)
+
    TODO for participants:
      - [ ] Add --mail-user / --mail-type from cluster profile
      - [ ] Add array job support: #SBATCH --array=1-{{ n_workers }}
-     - [ ] Handle module loads from cluster profile
      - [ ] Add Apptainer bind mounts for /scratch
 #}
 
@@ -24,11 +28,11 @@
 {% if cluster.slurm.account is defined %}
 #SBATCH --account={{ cluster.slurm.account }}
 {% endif %}
-#SBATCH --time={{ cluster.slurm.time | default("04:00:00") }}
+#SBATCH --time={{ cluster.slurm.time | default("00:05:00") }}
 #SBATCH --nodes={{ cluster.slurm.nodes | default(1) }}
 #SBATCH --ntasks-per-node={{ n_workers | default(1) }}
 #SBATCH --cpus-per-task={{ cluster.slurm.cpus_per_task | default(4) }}
-#SBATCH --mem={{ cluster.slurm.mem | default("16G") }}
+#SBATCH --mem={{ cluster.slurm.mem | default("8G") }}
 #SBATCH --output={{ cluster.scratch_dir }}/logs/%x_%j.out
 #SBATCH --error={{ cluster.scratch_dir }}/logs/%x_%j.err
 
@@ -51,6 +55,13 @@ apptainer exec \
     --bind {{ cluster.scratch_dir }}:/scratch \
     {{ cluster.scratch_dir }}/project_{{ image_tag }}.sif \
     python /app/src/smac_worker.py
+
+{% elif cluster.env_manager == "conda" %}
+# Conda: activate the named environment, then run directly
+conda activate {{ cluster.conda_env }}
+cd {{ cluster.repo_path }}
+python src/smac_worker.py
+
 {% else %}
 # Pixi / bare environment: run directly
 cd {{ cluster.repo_path }}
