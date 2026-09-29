@@ -1,0 +1,38 @@
+## Cluster B compose TEMPLATE ("## " lines are dropped). create.sh fills in the @...@ placeholders and writes
+## the result to generated/docker-compose.yml. Edit this file, not the generated one.
+name: cluster-b
+
+# Settings shared by every container.
+x-slurm: &slurm
+  image: cluster-b-slurm:latest
+  privileged: true            # Apptainer needs loop/squashfs mounts
+  # tini as PID 1. slurmstepd finds the container's cgroup root from PID 1's
+  # cgroup, so PID 1 must stay in /init (see entrypoint.sh), not follow slurmd.
+  init: true
+  networks: [cluster-b]
+  volumes:
+    - shared:/shared          # /shared/images, /shared/jobs, /shared/results
+    - .:/config:ro            # generated/slurm.conf
+  labels:
+    multi-cluster.cluster: cluster-b
+    # A changed slurm.conf changes this label, so compose recreates the containers.
+    multi-cluster.slurm-conf-sha256: "@SLURM_CONF_SHA@"
+
+services:
+  slurmctld:
+    <<: *slurm
+    container_name: slurmctld
+    hostname: slurmctld
+    command: ["slurmctld"]
+    cpus: 1
+    mem_limit: 1g
+
+@NODE_SERVICES@
+
+networks:
+  cluster-b:
+    name: cluster-b
+
+volumes:
+  shared:
+    name: cluster-b-shared
