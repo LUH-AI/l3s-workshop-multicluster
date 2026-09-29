@@ -78,7 +78,7 @@ Cluster profiles live in `config/clusters.json`. The KISSKI entry
   "key": "~/.ssh/id_ed25519",
   "type": "slurm",
   "env_manager": "conda",
-  "conda_env": "smac-env",
+  "conda_env": "l3s_workshop",
   "modules": ["miniforge3"],
   "repo_path": "/projects/extern/kisski/kisski-multicluster/dir.project/l3s-workshop-multicluster",
   "scratch_dir": "/projects/extern/kisski/kisski-multicluster/dir.project",
@@ -127,7 +127,7 @@ python src/smac_worker.py
 
 The `source` line is required because `conda activate` does not work
 in non-interactive batch scripts without it. If your environment has a
-different name from the default (`smac-env`), either update
+different name from the default (`l3s_workshop`), either update
 `config/clusters.json` or pass `--conda-env <name>` at runtime.
 
 If the environment does not exist yet, create it on the login node
@@ -136,8 +136,8 @@ before submitting:
 ```bash
 ssh u31890@glogin-gpu.hpc.gwdg.de
 module load miniforge3
-conda create -n smac-env python=3.10 -y
-conda activate smac-env
+conda create -n l3s_workshop python=3.10 -y
+conda activate l3s_workshop
 cd /projects/extern/kisski/kisski-multicluster/dir.project/l3s-workshop-multicluster
 pip install -r requirements.txt
 ```

@@ -14,7 +14,7 @@
     "key": "~/.ssh/id_ed25519",
     "type": "slurm",
     "env_manager": "conda",
-    "conda_env": "smac-env",
+    "conda_env": "l3s_env",
     "modules": ["miniforge3"],
     "repo_path": "/projects/extern/kisski/kisski-multicluster/dir.project/l3s-workshop-multicluster",
     "scratch_dir": "/projects/extern/kisski/kisski-multicluster/dir.project/l3s-workshop-multicluster",

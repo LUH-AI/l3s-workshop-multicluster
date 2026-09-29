@@ -58,6 +58,7 @@ apptainer exec \
 
 {% elif cluster.env_manager == "conda" %}
 # Conda: activate the named environment, then run directly
+source $(conda info --base)/etc/profile.d/conda.sh
 conda activate {{ cluster.conda_env }}
 cd {{ cluster.repo_path }}
 python src/smac_worker.py
