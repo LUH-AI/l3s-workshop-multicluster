@@ -16,8 +16,8 @@
     "env_manager": "conda",
     "conda_env": "smac-env",
     "modules": ["miniforge3"],
-    "repo_path": "/projects/extern/kisski/kisski-multicluster/dir.project",
-    "scratch_dir": "/projects/extern/kisski/kisski-multicluster/dir.project",
+    "repo_path": "/projects/extern/kisski/kisski-multicluster/dir.project/l3s-workshop-multicluster",
+    "scratch_dir": "/projects/extern/kisski/kisski-multicluster/dir.project/l3s-workshop-multicluster",
     "slurm": {
       "partition": "kisski",
       "time": "00:05:00",
