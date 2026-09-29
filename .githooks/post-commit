@@ -1,0 +1,3 @@
+#!/bin/sh
+# After every commit: release the environment if this commit changed it.
+exec "$(dirname "$0")/fab-auto" HEAD~1

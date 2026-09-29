@@ -46,9 +46,11 @@ mkdir -p {{ cluster.scratch_dir }}/logs
 
 # ── Run the worker ──────────────────────────────────────────────────
 {% if cluster.env_manager | default("pixi") == "apptainer" %}
-# Apptainer: run inside the container image
+# Apptainer: the image is only the environment - the code comes from the
+# repo checkout on the cluster, bound in at /app.
 apptainer exec \
     --bind {{ cluster.scratch_dir }}:/scratch \
+    --bind {{ cluster.repo_path }}:/app \
     {{ cluster.scratch_dir }}/project_{{ image_tag }}.sif \
     python /app/src/smac_worker.py
 {% else %}

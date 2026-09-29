@@ -1,0 +1,29 @@
+#!/bin/sh
+# Shared by the hooks below: starts `fab auto-release` in the background,
+# which checks whether <base>..HEAD touched the environment files
+# (ENV_FILES in fabfile.py) and, only then, runs `fab release` for the
+# clusters in `git config multicluster.autoClusters` (default: cluster-a).
+# Output goes to .fab-release.log. Set up with `fab install-hooks`.
+#
+# Usage: fab-auto <base-rev>
+
+FAB=$(git config multicluster.fab)
+if [ ! -x "$FAB" ]; then
+  echo "fab hook: fab not found ('$FAB') - run 'fab install-hooks' again" >&2
+  exit 0
+fi
+
+# Mid-rebase every replayed commit fires post-commit - wait for
+# post-rewrite at the end instead.
+GIT_DIR_ABS=$(git rev-parse --absolute-git-dir)
+[ -d "$GIT_DIR_ABS/rebase-merge" ] || [ -d "$GIT_DIR_ABS/rebase-apply" ] && exit 0
+
+# Root commit: diff against the empty tree.
+BASE=$(git rev-parse --verify -q "$1^{commit}" 2>/dev/null || git hash-object -t tree /dev/null)
+
+cd "$(git rev-parse --show-toplevel)" || exit 0
+# Git exports GIT_DIR/GIT_INDEX_FILE etc. into hooks - don't leak them into
+# the background run.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX
+nohup "$FAB" auto-release --base "$BASE" >> .fab-release.log 2>&1 < /dev/null &
+exit 0

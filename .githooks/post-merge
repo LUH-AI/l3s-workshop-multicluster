@@ -1,0 +1,3 @@
+#!/bin/sh
+# After `git pull`/`git merge`: release if the pulled changes touch the environment.
+exec "$(dirname "$0")/fab-auto" ORIG_HEAD
